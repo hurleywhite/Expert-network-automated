@@ -10,6 +10,7 @@ import type {
   ProjectCandidatesResponse,
 } from '../types';
 
+// API configuration
 const API_URL = import.meta.env.VITE_API_URL || 'http://localhost:8000';
 const API_KEY = import.meta.env.VITE_API_KEY || 'dev-api-key-change-in-production';
 

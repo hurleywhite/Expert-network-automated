@@ -33,19 +33,27 @@ export default function ProjectDetail() {
 
     try {
       setLoading(true);
-      const [projectData, statusData, queueData, approvedData, candidatesData] = await Promise.all([
+      // Load essential data first
+      const [projectData, statusData, queueData, approvedData] = await Promise.all([
         projectsApi.get(projectId),
         projectsApi.getStatus(projectId),
         projectsApi.getReviewQueue(projectId),
         projectsApi.getApprovedDrafts(projectId),
-        projectsApi.getCandidates(projectId),
       ]);
       setProject(projectData);
       setStatus(statusData);
       setReviewQueue(queueData);
       setApprovedDrafts(approvedData);
-      setCandidates(candidatesData);
       setError(null);
+
+      // Load candidates separately (non-critical)
+      try {
+        const candidatesData = await projectsApi.getCandidates(projectId);
+        setCandidates(candidatesData);
+      } catch (candidatesErr) {
+        console.error('Failed to load candidates:', candidatesErr);
+        // Don't fail the whole page, just skip candidates
+      }
     } catch (err) {
       setError('Failed to load project data');
       console.error(err);
