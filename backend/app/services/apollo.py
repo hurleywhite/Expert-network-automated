@@ -445,6 +445,58 @@ class ApolloService:
 
         return self._map_person_to_candidate(person)
 
+    def enrich_by_id(self, apollo_id: str) -> Dict[str, Any]:
+        """
+        Get full profile data for a person by their Apollo ID.
+
+        This endpoint reveals emails (costs credits) and gets complete profile.
+
+        Args:
+            apollo_id: Apollo person ID
+
+        Returns:
+            Candidate dictionary with enriched profile data
+        """
+        if self.stub_mode:
+            logger.info(f"[STUB] Enriching person by ID: {apollo_id}")
+            return {
+                "apollo_id": apollo_id,
+                "first_name": "John",
+                "last_name": "Smith",
+                "full_name": "John Smith",
+                "title": "Chief Commercial Officer",
+                "company": "Healthcare Corp",
+                "company_employee_count": 5000,
+                "linkedin_url": f"https://linkedin.com/in/johnsmith-{apollo_id[:8]}",
+                "email": f"jsmith-{apollo_id[:6]}@healthcarecorp.com",
+                "email_verified": True,
+                "region": "San Francisco, CA, United States",
+                "apollo_data": {
+                    "organization_id": "mock-org",
+                    "industry": "Healthcare",
+                    "seniority": "c_suite",
+                    "departments": ["Executive"],
+                    "email_status": "verified",
+                }
+            }
+
+        logger.info(f"Enriching person by Apollo ID: {apollo_id}")
+
+        response = self._make_request(
+            "POST",
+            "people/match",
+            json_data={
+                "id": apollo_id,
+                "reveal_personal_emails": True,  # This reveals the email (costs credits)
+            }
+        )
+
+        person = response.get("person")
+        if not person:
+            raise ApolloAPIError(404, f"Person not found for Apollo ID: {apollo_id}")
+
+        return self._map_person_to_candidate(person)
+
     def find_email(self, person_id: str) -> Dict[str, Any]:
         """
         Find verified email for a person by their Apollo ID.

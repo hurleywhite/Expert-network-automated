@@ -466,7 +466,16 @@ def get_project_candidates(
 
     candidates = []
     for candidate in project_candidates:
+        # Only include candidates with email addresses
+        if not candidate.email:
+            continue
+
         score_record = scores_map.get(candidate.id)
+        # Cap score at 100 for display
+        score_value = score_record.score if score_record else None
+        if score_value is not None:
+            score_value = min(100, score_value)
+
         candidates.append({
             "candidate_id": str(candidate.id),
             "full_name": candidate.full_name,
@@ -475,7 +484,7 @@ def get_project_candidates(
             "email": candidate.email,
             "linkedin_url": candidate.linkedin_url,
             "region": candidate.region,
-            "score": score_record.score if score_record else None,
+            "score": score_value,
             "hard_pass": score_record.hard_pass if score_record else False,
             "reasons": score_record.reasons if score_record else [],
         })

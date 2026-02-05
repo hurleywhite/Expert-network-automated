@@ -290,6 +290,117 @@ def import_candidates_for_project(
     )
 
 
+@router.post("/enrich-project/{project_id}")
+def enrich_project_candidates(
+    project_id: UUID,
+    limit: int = 25,
+    db: Session = Depends(get_db),
+) -> Dict[str, Any]:
+    """
+    Enrich all candidates for a project to get full names and emails.
+
+    This uses Apollo's people/match API with the Apollo IDs from import.
+    Each enrichment costs Apollo API credits.
+
+    Args:
+        project_id: The project to enrich candidates for
+        limit: Maximum number of candidates to enrich (to control costs)
+    """
+    from app import models
+
+    # Get candidates sourced for this project that need enrichment
+    candidates = (
+        db.query(models.Candidate)
+        .join(models.CandidateSource)
+        .filter(
+            models.CandidateSource.source_payload['project_id'].astext == str(project_id)
+        )
+        .limit(limit)
+        .all()
+    )
+
+    apollo = get_apollo_service()
+    enriched_count = 0
+    failed_count = 0
+    results = []
+
+    for candidate in candidates:
+        # Get Apollo ID from source
+        source = (
+            db.query(models.CandidateSource)
+            .filter(models.CandidateSource.candidate_id == candidate.id)
+            .first()
+        )
+
+        if not source or not source.source_payload:
+            continue
+
+        apollo_id = source.source_payload.get("apollo_id")
+        if not apollo_id:
+            continue
+
+        try:
+            # Enrich using Apollo ID
+            enriched = apollo.enrich_by_id(apollo_id)
+
+            # Update candidate with enriched data
+            if enriched.get("first_name"):
+                candidate.first_name = enriched["first_name"]
+            if enriched.get("last_name"):
+                candidate.last_name = enriched["last_name"]
+            if enriched.get("first_name") and enriched.get("last_name"):
+                candidate.full_name = f"{enriched['first_name']} {enriched['last_name']}"
+            if enriched.get("email"):
+                candidate.email = enriched["email"]
+                candidate.email_verified = enriched.get("email_verified", False)
+            if enriched.get("linkedin_url"):
+                candidate.linkedin_url = enriched["linkedin_url"]
+            if enriched.get("region"):
+                candidate.region = enriched["region"]
+            if enriched.get("company_employee_count"):
+                candidate.company_employee_count = enriched["company_employee_count"]
+
+            # Update status
+            candidate.status = models.CandidateStatus.ENRICHED
+
+            db.commit()
+            enriched_count += 1
+
+            results.append({
+                "candidate_id": str(candidate.id),
+                "full_name": candidate.full_name,
+                "email": candidate.email,
+                "status": "enriched"
+            })
+
+            # Small delay between requests
+            import time
+            time.sleep(0.5)
+
+        except ApolloRateLimitError as e:
+            # Stop if rate limited
+            results.append({
+                "candidate_id": str(candidate.id),
+                "error": f"Rate limited, retry after {e.retry_after}s"
+            })
+            break
+
+        except ApolloAPIError as e:
+            failed_count += 1
+            results.append({
+                "candidate_id": str(candidate.id),
+                "error": str(e)
+            })
+
+    return {
+        "project_id": str(project_id),
+        "candidates_processed": len(results),
+        "enriched": enriched_count,
+        "failed": failed_count,
+        "results": results,
+    }
+
+
 @router.post("/enrich", response_model=Dict[str, Any])
 def enrich_person(
     request: EnrichPersonRequest,

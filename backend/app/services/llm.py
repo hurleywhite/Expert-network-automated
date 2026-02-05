@@ -132,7 +132,7 @@ I'm reaching out because I saw [SPECIFIC CREDENTIAL/SIGNAL] and it looks like yo
 
 I'm doing targeted research on [TOPIC] to inform an internal analysis. Would you be open to a 30-minute call this week or next?
 
-We'd keep it tight — mainly:
+We'd keep it brief, mainly focusing on:
 • How [CUSTOMERS/TEAMS] evaluate [THING] and what actually drives decisions
 • Common pitfalls / failure modes you've seen in [PROCESS]
 • What's changing in [MARKET/REGULATION/TECH] in the near future
@@ -189,7 +189,7 @@ I'm reaching out because I saw your role as {title} at {company} and it looks li
 
 I'm doing targeted research on {research_topic} to inform an internal analysis. Would you be open to a 30-minute call this week or next?
 
-We'd keep it tight — mainly:
+We'd keep it brief, mainly focusing on:
 • How teams evaluate solutions and what actually drives decisions
 • Common pitfalls / failure modes you've seen
 • What's changing in the market in the near future
@@ -202,4 +202,174 @@ Best,
 {sender_name}""",
             "facts_used": facts_used,
             "risk_flags": ["stub_mode_no_api_key"],
+        }
+
+    def score_candidate(
+        self,
+        candidate_facts: Dict[str, Any],
+        project_facts: Dict[str, Any],
+    ) -> Dict[str, Any]:
+        """
+        Use LLM to intelligently score a candidate's fit for a project.
+
+        Returns dict with: relevance_score (0-100), confidence, reasoning, signals
+        """
+        if not self.client:
+            return self._stub_score(candidate_facts, project_facts)
+
+        prompt = self._build_scoring_prompt(candidate_facts, project_facts)
+
+        try:
+            response = self.client.messages.create(
+                model=settings.anthropic_model,
+                max_tokens=1024,
+                messages=[{"role": "user", "content": prompt}],
+            )
+
+            response_text = response.content[0].text
+
+            # Strip markdown code blocks if present
+            if response_text.startswith("```"):
+                lines = response_text.split("\n")
+                lines = [l for l in lines if not l.startswith("```")]
+                response_text = "\n".join(lines)
+
+            result = json.loads(response_text)
+
+            # Ensure required fields with defaults
+            return {
+                "relevance_score": result.get("relevance_score", 50),
+                "confidence": result.get("confidence", "medium"),
+                "reasoning": result.get("reasoning", []),
+                "title_match_quality": result.get("title_match_quality", "partial"),
+                "expertise_signals": result.get("expertise_signals", []),
+                "concerns": result.get("concerns", []),
+                "recommendation": result.get("recommendation", "review"),
+            }
+
+        except Exception as e:
+            # Fallback to stub on error
+            return self._stub_score(candidate_facts, project_facts)
+
+    def _build_scoring_prompt(
+        self,
+        candidate_facts: Dict[str, Any],
+        project_facts: Dict[str, Any],
+    ) -> str:
+        """Build prompt for LLM-based candidate scoring"""
+        return f"""You are an expert network researcher evaluating whether a candidate is a good fit for an expert consultation project.
+
+PROJECT REQUIREMENTS:
+- Industry: {project_facts.get('industry', 'Not specified')}
+- Subvertical: {project_facts.get('subvertical', 'Not specified')}
+- Target Titles: {json.dumps(project_facts.get('titles_include', []))}
+- Titles to Exclude: {json.dumps(project_facts.get('titles_exclude', []))}
+- Keywords of Interest: {json.dumps(project_facts.get('keywords', []))}
+- Minimum Company Size: {project_facts.get('company_size_min', 'Not specified')}
+- Target Regions: {json.dumps(project_facts.get('regions', []))}
+
+CANDIDATE PROFILE:
+- Name: {candidate_facts.get('full_name', 'Unknown')}
+- Title: {candidate_facts.get('title', 'Unknown')}
+- Company: {candidate_facts.get('company', 'Unknown')}
+- Company Size: {candidate_facts.get('company_employee_count', 'Unknown')} employees
+- Region: {candidate_facts.get('region', 'Unknown')}
+- Has Email: {'Yes' if candidate_facts.get('email') else 'No'}
+- Has LinkedIn: {'Yes' if candidate_facts.get('linkedin_url') else 'No'}
+
+EVALUATE THIS CANDIDATE:
+
+1. TITLE RELEVANCE: Does their title indicate they have the expertise we're looking for?
+   - Consider semantic similarity (e.g., "CCO" = "Chief Commercial Officer")
+   - Consider related roles that would have similar knowledge
+   - Consider seniority level appropriateness
+
+2. COMPANY FIT: Does their company context make them a good source?
+   - Is the company in the right industry/space?
+   - Is the company size appropriate?
+   - Would they have relevant exposure at this company?
+
+3. EXPERTISE SIGNALS: What specific knowledge would they likely have?
+   - What decisions do they probably make or influence?
+   - What processes/systems are they likely familiar with?
+   - What market dynamics would they understand?
+
+4. CONCERNS: What might make them a poor fit?
+   - Title mismatch or tangential role
+   - Company in wrong industry
+   - Seniority too junior/senior for the need
+
+OUTPUT FORMAT (strict JSON):
+{{
+  "relevance_score": <0-100 integer>,
+  "confidence": "<high|medium|low>",
+  "title_match_quality": "<exact|strong|partial|weak|mismatch>",
+  "reasoning": [
+    "reason 1 for the score",
+    "reason 2 for the score",
+    "reason 3 for the score"
+  ],
+  "expertise_signals": [
+    "specific expertise they likely have",
+    "another area of knowledge"
+  ],
+  "concerns": [
+    "any concern about fit (or empty array if none)"
+  ],
+  "recommendation": "<priority|include|review|skip>"
+}}
+
+SCORING GUIDELINES:
+- 85-100: Excellent fit - title closely matches, company is in target space, high confidence
+- 70-84: Good fit - strong relevance, would likely be valuable
+- 50-69: Moderate fit - some relevance but not ideal match
+- 30-49: Weak fit - tangential relevance, consider only if pipeline is thin
+- 0-29: Poor fit - likely not relevant, skip unless desperate
+
+Be rigorous but practical. We want experts who can speak credibly to the topic, not perfect matches.
+
+Evaluate now:"""
+
+    def _stub_score(
+        self,
+        candidate_facts: Dict[str, Any],
+        project_facts: Dict[str, Any],
+    ) -> Dict[str, Any]:
+        """Fallback scoring when no API key is configured"""
+        title = (candidate_facts.get("title") or "").lower()
+        titles_include = [t.lower() for t in project_facts.get("titles_include", [])]
+
+        # Simple title matching
+        title_match = "mismatch"
+        base_score = 40
+
+        for target in titles_include:
+            if target in title:
+                title_match = "exact"
+                base_score = 75
+                break
+            # Check word overlap
+            target_words = set(target.split())
+            title_words = set(title.split())
+            if target_words & title_words:
+                title_match = "partial"
+                base_score = 55
+                break
+
+        # Adjust for data quality
+        if candidate_facts.get("email"):
+            base_score += 10
+        if candidate_facts.get("linkedin_url"):
+            base_score += 5
+        if candidate_facts.get("company_employee_count"):
+            base_score += 5
+
+        return {
+            "relevance_score": min(100, base_score),
+            "confidence": "low",
+            "title_match_quality": title_match,
+            "reasoning": ["stub_mode_no_api_key - using rule-based fallback"],
+            "expertise_signals": [],
+            "concerns": ["LLM scoring not available - basic matching only"],
+            "recommendation": "review",
         }

@@ -210,6 +210,8 @@ class Pipeline:
 
         for candidate in candidates:
             candidate_dict = {
+                "full_name": candidate.full_name,
+                "email": candidate.email,
                 "title": candidate.title,
                 "company": candidate.company,
                 "region": candidate.region,
