@@ -99,7 +99,7 @@ export default function Dashboard() {
               to={`/projects/${project.id}`}
               className="block bg-white rounded-lg shadow border border-gray-200 p-5 hover:shadow-md transition-shadow"
             >
-              <h2 className="text-lg font-semibold text-gray-900 truncate">
+              <h2 className="text-lg font-semibold text-gray-900">
                 {formatProjectName(project.name)}
               </h2>
 

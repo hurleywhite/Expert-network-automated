@@ -90,6 +90,7 @@ export interface ApprovedDraft {
   candidate_title: string;
   candidate_company: string;
   candidate_email: string;
+  candidate_linkedin?: string | null;
   subject: string;
   approved_at: string | null;
   approved_by: string | null;

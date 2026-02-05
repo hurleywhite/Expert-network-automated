@@ -545,6 +545,16 @@ export default function ProjectDetail() {
                 <div className="flex items-center justify-between">
                   <div>
                     <p className="font-medium text-gray-900">{draft.candidate_name}</p>
+                    {draft.candidate_linkedin && (
+                      <a
+                        href={draft.candidate_linkedin}
+                        target="_blank"
+                        rel="noopener noreferrer"
+                        className="text-xs text-blue-600 hover:underline"
+                      >
+                        LinkedIn
+                      </a>
+                    )}
                     <p className="text-sm text-gray-600">{draft.candidate_title} at {draft.candidate_company}</p>
                     <p className="text-sm text-gray-500">{draft.candidate_email}</p>
                   </div>
@@ -576,6 +586,16 @@ export default function ProjectDetail() {
                 <div className="flex items-center justify-between">
                   <div>
                     <p className="font-medium text-gray-900">{draft.candidate_name}</p>
+                    {draft.candidate_linkedin && (
+                      <a
+                        href={draft.candidate_linkedin}
+                        target="_blank"
+                        rel="noopener noreferrer"
+                        className="text-xs text-blue-600 hover:underline"
+                      >
+                        LinkedIn
+                      </a>
+                    )}
                     <p className="text-sm text-gray-600">{draft.candidate_title} at {draft.candidate_company}</p>
                     <p className="text-sm text-gray-500">{draft.candidate_email}</p>
                   </div>

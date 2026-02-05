@@ -52,6 +52,11 @@ class DraftWithContextRequest(BaseModel):
     limit: Optional[int] = None
 
 
+class ScoreAllRequest(BaseModel):
+    """Optional request body for score-all with auto-draft context."""
+    outreach_context: Optional[OutreachContext] = None
+
+
 @router.post("/", response_model=schemas.ProjectBriefResponse, status_code=201)
 def create_project(
     project: schemas.ProjectBriefCreate,
@@ -166,6 +171,7 @@ def draft_message(
 @router.post("/{project_id}/score-all")
 def score_all_candidates(
     project_id: UUID,
+    request: Optional[ScoreAllRequest] = None,
     db: Session = Depends(get_db),
 ):
     """
@@ -177,9 +183,21 @@ def score_all_candidates(
     - Domain expertise signals
     - Company fit
 
-    Returns ranked list with recommendations.
+    After scoring, automatically generates drafts for qualified candidates (score >= 40).
+
+    Optionally provide outreach_context to customize the auto-generated drafts:
+    - research_topic: What you're researching
+    - rate_range: Compensation offered
+    - sender_name: Your name
+    - sender_title: Your title
+
+    Returns ranked list with recommendations and auto-draft count.
     """
-    result = Pipeline.score_all_candidates(db, project_id)
+    outreach_context = None
+    if request and request.outreach_context:
+        outreach_context = request.outreach_context.model_dump()
+
+    result = Pipeline.score_all_candidates(db, project_id, outreach_context=outreach_context)
     if "error" in result:
         raise HTTPException(status_code=404, detail=result["error"])
     return result
@@ -399,6 +417,7 @@ def get_approved_drafts(
             "candidate_title": candidate.title if candidate else "",
             "candidate_company": candidate.company if candidate else "",
             "candidate_email": candidate.email if candidate else "",
+            "candidate_linkedin": candidate.linkedin_url if candidate else None,
             "subject": draft.subject,
             "approved_at": draft.approved_at.isoformat() if draft.approved_at else None,
             "approved_by": draft.approved_by,

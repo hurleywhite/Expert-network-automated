@@ -156,12 +156,17 @@ class Pipeline:
 
     @classmethod
     def score_all_candidates(
-        cls, db: Session, project_id: UUID
+        cls, db: Session, project_id: UUID, outreach_context: Optional[Dict[str, Any]] = None
     ) -> Dict[str, Any]:
         """
-        Score all candidates against a project.
+        Score all candidates against a project and auto-generate drafts.
 
-        Returns scoring summary and candidate rankings.
+        After scoring, automatically drafts emails for qualified candidates (score >= 40).
+
+        Args:
+            outreach_context: Optional dict with research_topic, rate_range, sender_name, sender_title
+
+        Returns scoring summary, candidate rankings, and auto-draft count.
         """
         project = crud.get_project(db, project_id)
         if not project:
@@ -258,6 +263,29 @@ class Pipeline:
 
         # Sort by score descending
         results["rankings"].sort(key=lambda x: x["score"], reverse=True)
+
+        # Auto-generate drafts for qualified candidates
+        if results["qualified"] > 0:
+            # Use provided context or build default from project info
+            if outreach_context:
+                context = outreach_context
+            else:
+                context = {
+                    "research_topic": f"{project.industry or 'industry'} trends and practices",
+                    "rate_range": "500 dollars",
+                    "sender_name": "Research Team",
+                    "sender_title": "Research Director",
+                }
+
+            draft_results = cls.draft_for_qualified_candidates(
+                db=db,
+                project_id=project_id,
+                min_score=cls.MIN_SCORE_FOR_OUTREACH,
+                outreach_context=context,
+            )
+
+            results["auto_drafted"] = draft_results.get("drafted", 0)
+            results["draft_errors"] = draft_results.get("errors", 0)
 
         return results
 
