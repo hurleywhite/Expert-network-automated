@@ -90,7 +90,7 @@ CANDIDATE FACTS (use ONLY these - do not hallucinate):
 
 OUTREACH CONTEXT:
 - Research topic: {research_topic}
-- Rate range: {rate_range}/30 min
+- Rate: ${rate_range} for 30 min
 - Sender: {sender_name} {sender_title}
 
 YOUR TASK:
@@ -112,7 +112,7 @@ We'd keep it tight — mainly:
 • Common pitfalls / failure modes you've seen in [PROCESS]
 • What's changing in [MARKET/REGULATION/TECH] over the next 12–18 months
 
-No prep required. And we can offer [RATE]/30 min (varies by experience), if helpful.
+No prep required. And we can offer $[RATE] for 30 min (varies by experience), if helpful.
 
 If you're open, what does your availability look like — or should I send a scheduling link?
 
@@ -169,7 +169,7 @@ We'd keep it tight — mainly:
 • Common pitfalls / failure modes you've seen
 • What's changing in the market over the next 12–18 months
 
-No prep required. And we can offer {rate_range}/30 min (varies by experience), if helpful.
+No prep required. And we can offer ${rate_range} for 30 min (varies by experience), if helpful.
 
 If you're open, what does your availability look like — or should I send a scheduling link?
 
