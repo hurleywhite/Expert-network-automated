@@ -102,7 +102,8 @@ YOUR TASK:
 2. Draft an email using this EXACT structure:
 
 ---
-Hi [FIRST NAME] — I'm reaching out because I saw [SPECIFIC CREDENTIAL/SIGNAL] and it looks like you've had hands-on exposure to [RELEVANT DOMAIN].
+Hi [FIRST NAME],
+I'm reaching out because I saw [SPECIFIC CREDENTIAL/SIGNAL] and it looks like you've had hands-on exposure to [RELEVANT DOMAIN].
 
 I'm doing targeted research on [TOPIC] to inform an internal analysis. Would you be open to a 30-minute call this week or next?
 
@@ -117,7 +118,6 @@ If you're open, what does your availability look like — or should I send a sch
 
 Best,
 [SENDER NAME]
-[SENDER TITLE]
 ---
 
 CRITICAL RULES:
@@ -159,7 +159,8 @@ Draft the email now:"""
 
         return {
             "subject": "Quick research question",
-            "body": f"""Hi {first_name} — I'm reaching out because I saw your role as {title} at {company} and it looks like you've had hands-on exposure to this space.
+            "body": f"""Hi {first_name},
+I'm reaching out because I saw your role as {title} at {company} and it looks like you've had hands-on exposure to this space.
 
 I'm doing targeted research on {research_topic} to inform an internal analysis. Would you be open to a 30-minute call this week or next?
 
@@ -173,8 +174,7 @@ No prep required. And we can offer {rate_range}/30 min (varies by experience), i
 If you're open, what does your availability look like — or should I send a scheduling link?
 
 Best,
-{sender_name}
-{sender_title}""".strip(),
+{sender_name}""",
             "facts_used": facts_used,
             "risk_flags": ["stub_mode_no_api_key"],
         }
