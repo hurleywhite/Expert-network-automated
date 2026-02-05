@@ -63,6 +63,14 @@ export const draftsApi = {
     });
     return response.data;
   },
+
+  reject: async (draftId: string, rejectedBy: string, reason?: string): Promise<{ status: string; draft_id: string }> => {
+    const response = await api.post(`/drafts/${draftId}/reject`, {
+      rejected_by: rejectedBy,
+      reason,
+    });
+    return response.data;
+  },
 };
 
 export default api;

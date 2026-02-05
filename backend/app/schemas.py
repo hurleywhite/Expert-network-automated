@@ -108,6 +108,11 @@ class DraftApproval(BaseModel):
     approved_by: str
 
 
+class DraftRejection(BaseModel):
+    rejected_by: str
+    reason: Optional[str] = None
+
+
 class DraftSend(BaseModel):
     actor: str
 

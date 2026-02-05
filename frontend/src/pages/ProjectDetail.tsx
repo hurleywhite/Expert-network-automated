@@ -13,6 +13,7 @@ export default function ProjectDetail() {
   const [loading, setLoading] = useState(true);
   const [error, setError] = useState<string | null>(null);
   const [approvingDraft, setApprovingDraft] = useState<string | null>(null);
+  const [rejectingDraft, setRejectingDraft] = useState<string | null>(null);
   const [bulkApproving, setBulkApproving] = useState(false);
   const [sending, setSending] = useState(false);
   const [successMessage, setSuccessMessage] = useState<string | null>(null);
@@ -54,6 +55,21 @@ export default function ProjectDetail() {
       console.error(err);
     } finally {
       setApprovingDraft(null);
+      setTimeout(() => setSuccessMessage(null), 3000);
+    }
+  };
+
+  const handleRejectDraft = async (draftId: string) => {
+    setRejectingDraft(draftId);
+    try {
+      await draftsApi.reject(draftId, 'reviewer');
+      setSuccessMessage('Draft rejected and removed');
+      await loadData();
+    } catch (err) {
+      setError('Failed to reject draft');
+      console.error(err);
+    } finally {
+      setRejectingDraft(null);
       setTimeout(() => setSuccessMessage(null), 3000);
     }
   };
@@ -328,7 +344,9 @@ export default function ProjectDetail() {
                     key={draft.draft_id}
                     draft={draft}
                     onApprove={handleApproveDraft}
+                    onReject={handleRejectDraft}
                     isApproving={approvingDraft === draft.draft_id}
+                    isRejecting={rejectingDraft === draft.draft_id}
                   />
                 ))}
               </div>
@@ -353,7 +371,9 @@ export default function ProjectDetail() {
                     key={draft.draft_id}
                     draft={draft}
                     onApprove={handleApproveDraft}
+                    onReject={handleRejectDraft}
                     isApproving={approvingDraft === draft.draft_id}
+                    isRejecting={rejectingDraft === draft.draft_id}
                   />
                 ))}
               </div>

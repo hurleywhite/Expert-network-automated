@@ -83,6 +83,34 @@ def approve_draft(
     return draft
 
 
+@router.post("/{draft_id}/reject")
+def reject_draft(
+    draft_id: UUID,
+    rejection: schemas.DraftRejection,
+    db: Session = Depends(get_db),
+):
+    """Reject a message draft - removes it from the queue."""
+    draft = crud.get_draft(db, draft_id)
+    if not draft:
+        raise HTTPException(status_code=404, detail="Draft not found")
+
+    # Delete the draft
+    db.delete(draft)
+    db.commit()
+
+    # Log the rejection
+    crud.create_audit_log(
+        db,
+        rejection.rejected_by,
+        "reject_draft",
+        "draft",
+        str(draft_id),
+        {"reason": rejection.reason} if rejection.reason else {},
+    )
+
+    return {"status": "rejected", "draft_id": str(draft_id)}
+
+
 @router.post("/{draft_id}/send", response_model=schemas.JobEnqueuedResponse)
 def send_draft(
     draft_id: UUID,
