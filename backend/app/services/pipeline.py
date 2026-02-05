@@ -34,21 +34,53 @@ class Pipeline:
         cls, db: Session, description: str, created_by: str
     ) -> Dict[str, Any]:
         """
-        Create a project from natural language description.
+        Create a project from natural language description, or return existing if similar.
 
         Example:
             "Find 401(k) benefits administrators at companies with 10,000+ employees"
+
+        If a similar project already exists (by name/industry), returns existing project.
+        New candidates will be added to the existing project when searched.
         """
         parser = ProjectParser()
         parsed = parser.parse(description)
 
-        # Create the project
+        project_name = parsed.get("name", description[:50])
+        industry = parsed.get("industry")
+        subvertical = parsed.get("subvertical")
+
+        # Check for existing similar project
+        existing_project = cls._find_similar_project(
+            db, project_name, industry, subvertical
+        )
+
+        if existing_project:
+            # Return existing project
+            crud.create_audit_log(
+                db,
+                created_by,
+                "found_existing_project",
+                "project",
+                str(existing_project.id),
+                {
+                    "original_description": description,
+                    "matched_to": existing_project.name,
+                },
+            )
+            return {
+                "project": existing_project,
+                "interpretation": f"Found existing project: {existing_project.name}",
+                "parsed_criteria": parsed,
+                "is_existing": True,
+            }
+
+        # Create new project
         from app.schemas import ProjectBriefCreate
 
         project_data = ProjectBriefCreate(
-            name=parsed.get("name", description[:50]),
-            industry=parsed.get("industry"),
-            subvertical=parsed.get("subvertical"),
+            name=project_name,
+            industry=industry,
+            subvertical=subvertical,
             company_size_min=parsed.get("company_size_min"),
             regions=parsed.get("regions", []),
             titles_include=parsed.get("titles_include", []),
@@ -77,7 +109,50 @@ class Pipeline:
             "project": project,
             "interpretation": parsed.get("interpretation"),
             "parsed_criteria": parsed,
+            "is_existing": False,
         }
+
+    @classmethod
+    def _find_similar_project(
+        cls, db: Session, name: str, industry: Optional[str], subvertical: Optional[str]
+    ) -> Optional[models.ProjectBrief]:
+        """
+        Find an existing project that matches the criteria.
+
+        Matches on:
+        - Exact or similar name
+        - Same industry + subvertical
+        """
+        # Try exact name match first
+        existing = db.query(models.ProjectBrief).filter(
+            models.ProjectBrief.name == name
+        ).first()
+        if existing:
+            return existing
+
+        # Try industry + subvertical match
+        if industry and subvertical:
+            existing = db.query(models.ProjectBrief).filter(
+                models.ProjectBrief.industry == industry,
+                models.ProjectBrief.subvertical == subvertical,
+            ).first()
+            if existing:
+                return existing
+
+        # Try fuzzy name match (contains key words)
+        name_lower = name.lower()
+        key_words = [w for w in name_lower.split() if len(w) > 4]
+
+        if key_words:
+            projects = db.query(models.ProjectBrief).all()
+            for project in projects:
+                project_name_lower = project.name.lower()
+                # Check if most key words match
+                matches = sum(1 for w in key_words if w in project_name_lower)
+                if matches >= len(key_words) * 0.6:  # 60% word match
+                    return project
+
+        return None
 
     @classmethod
     def score_all_candidates(
