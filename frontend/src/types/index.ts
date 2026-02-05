@@ -36,6 +36,7 @@ export interface Draft {
   candidate_title: string;
   candidate_company: string;
   candidate_email: string;
+  candidate_linkedin?: string;
   score: number;
   subject: string;
   body: string;

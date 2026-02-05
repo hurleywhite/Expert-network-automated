@@ -468,6 +468,7 @@ class Pipeline:
                 "candidate_title": candidate.title if candidate else "",
                 "candidate_company": candidate.company if candidate else "",
                 "candidate_email": candidate.email if candidate else "",
+                "candidate_linkedin": candidate.linkedin_url if candidate else "",
                 "score": score_value,
                 "subject": draft.subject,
                 "body": draft.body,

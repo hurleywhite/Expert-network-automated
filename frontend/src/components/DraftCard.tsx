@@ -37,6 +37,16 @@ export default function DraftCard({ draft, onApprove, onReject, isApproving, isR
                 </span>
               )}
             </div>
+            {draft.candidate_linkedin && (
+              <a
+                href={draft.candidate_linkedin}
+                target="_blank"
+                rel="noopener noreferrer"
+                className="text-xs text-blue-600 hover:underline"
+              >
+                LinkedIn
+              </a>
+            )}
             <p className="text-sm text-gray-600 mt-1">
               {draft.candidate_title} at {draft.candidate_company}
             </p>
