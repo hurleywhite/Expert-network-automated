@@ -223,6 +223,22 @@ class Pipeline:
 
         llm_service = LLMService()
 
+        # Fetch rejection learnings for this project to improve future drafts
+        rejection_learnings = (
+            db.query(models.RejectionLearning)
+            .filter(models.RejectionLearning.project_id == project_id)
+            .order_by(models.RejectionLearning.created_at.desc())
+            .limit(5)
+            .all()
+        )
+        learnings_data = [
+            {
+                "rejected_body": rl.rejected_body,
+                "inferred_issues": rl.inferred_issues or [],
+            }
+            for rl in rejection_learnings
+        ]
+
         for score_record in scores:
             candidate = crud.get_candidate(db, score_record.candidate_id)
 
@@ -265,8 +281,13 @@ class Pipeline:
             }
 
             try:
-                # Generate draft
-                draft_result = llm_service.draft_message(candidate_facts, project_facts, outreach_context)
+                # Generate draft (with learnings from past rejections)
+                draft_result = llm_service.draft_message(
+                    candidate_facts,
+                    project_facts,
+                    outreach_context,
+                    rejection_learnings=learnings_data if learnings_data else None,
+                )
 
                 # Validate
                 provided_facts = {

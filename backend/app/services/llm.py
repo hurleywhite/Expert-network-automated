@@ -19,9 +19,13 @@ class LLMService:
         candidate_facts: Dict[str, Any],
         project_facts: Dict[str, Any],
         outreach_context: Optional[Dict[str, Any]] = None,
+        rejection_learnings: Optional[List[Dict[str, Any]]] = None,
     ) -> Dict[str, Any]:
         """
         Draft an outreach message using Claude.
+
+        Args:
+            rejection_learnings: List of past rejected drafts with issues to avoid
 
         Returns dict with: subject, body, facts_used, risk_flags
         """
@@ -35,7 +39,7 @@ class LLMService:
         }
 
         # Create prompt
-        prompt = self._build_prompt(provided_facts, outreach_context)
+        prompt = self._build_prompt(provided_facts, outreach_context, rejection_learnings)
 
         try:
             response = self.client.messages.create(
@@ -69,8 +73,13 @@ class LLMService:
             # Fallback to stub on error
             return self._stub_draft(candidate_facts, project_facts)
 
-    def _build_prompt(self, provided_facts: Dict[str, Any], outreach_context: Optional[Dict[str, Any]] = None) -> str:
-        """Build the prompt with expert-network style template"""
+    def _build_prompt(
+        self,
+        provided_facts: Dict[str, Any],
+        outreach_context: Optional[Dict[str, Any]] = None,
+        rejection_learnings: Optional[List[Dict[str, Any]]] = None,
+    ) -> str:
+        """Build the prompt with expert-network style template and learnings from rejections"""
         facts_json = json.dumps(provided_facts, indent=2)
 
         # Default outreach context if not provided
@@ -83,7 +92,23 @@ class LLMService:
         # Build context-specific interview questions based on the domain
         domain = provided_facts.get("project.subvertical") or provided_facts.get("project.industry") or "their field"
 
-        return f"""You are drafting a professional expert-network outreach email (like GLG, AlphaSights, Third Bridge style).
+        # Build rejection learnings section if available
+        learnings_section = ""
+        if rejection_learnings and len(rejection_learnings) > 0:
+            learnings_section = "\n\nLEARN FROM PAST MISTAKES - DO NOT REPEAT THESE ISSUES:\n"
+            for i, learning in enumerate(rejection_learnings[:3], 1):  # Limit to 3 examples
+                issues = learning.get("inferred_issues", [])
+                learnings_section += f"\nRejected Example {i}:\n"
+                learnings_section += f"- Issues: {', '.join(issues)}\n"
+                # Include a snippet of the rejected body to show what to avoid
+                rejected_body = learning.get("rejected_body", "")
+                if len(rejected_body) > 200:
+                    rejected_body = rejected_body[:200] + "..."
+                learnings_section += f"- Rejected opening: \"{rejected_body.split(chr(10))[0]}\"\n"
+
+            learnings_section += "\nAVOID these patterns. Write naturally and professionally, not robotically.\n"
+
+        return f"""You are drafting a professional expert-network outreach email (like GLG, AlphaSights, Third Bridge style).{learnings_section}
 
 CANDIDATE FACTS (use ONLY these - do not hallucinate):
 {facts_json}

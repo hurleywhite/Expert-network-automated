@@ -281,3 +281,22 @@ class AuditLog(Base):
         Index("ix_audit_log_entity", "entity_type", "entity_id"),
         Index("ix_audit_log_actor", "actor"),
     )
+
+
+class RejectionLearning(Base):
+    """Stores rejected drafts to learn from mistakes and improve future drafts."""
+    __tablename__ = "rejection_learnings"
+
+    id = Column(Integer, primary_key=True, autoincrement=True)
+    project_id = Column(UUID(as_uuid=True), ForeignKey("project_briefs.id"), nullable=False)
+    candidate_title = Column(String)
+    candidate_company = Column(String)
+    rejected_subject = Column(String, nullable=False)
+    rejected_body = Column(Text, nullable=False)
+    inferred_issues = Column(JSON, default=list)  # Auto-detected problems
+    rejected_by = Column(String, nullable=False)
+    created_at = Column(DateTime, default=datetime.utcnow, nullable=False)
+
+    __table_args__ = (
+        Index("ix_rejection_learning_project", "project_id"),
+    )
