@@ -447,14 +447,19 @@ class Pipeline:
 
         for draft in drafts:
             candidate = crud.get_candidate(db, draft.candidate_id)
+            # Get the latest score (order by id desc to get most recent)
             score = (
                 db.query(models.Score)
                 .filter(
                     models.Score.candidate_id == draft.candidate_id,
                     models.Score.project_id == project_id,
                 )
+                .order_by(models.Score.id.desc())
                 .first()
             )
+
+            # Cap score at 100 for display
+            score_value = min(100, score.score) if score else 0
 
             draft_info = {
                 "draft_id": str(draft.id),
@@ -463,7 +468,7 @@ class Pipeline:
                 "candidate_title": candidate.title if candidate else "",
                 "candidate_company": candidate.company if candidate else "",
                 "candidate_email": candidate.email if candidate else "",
-                "score": score.score if score else 0,
+                "score": score_value,
                 "subject": draft.subject,
                 "body": draft.body,
                 "facts_used": draft.facts_used,
