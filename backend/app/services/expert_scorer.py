@@ -1,55 +1,22 @@
 """
-Expert network-style candidate scoring.
+Confidence-based candidate scoring.
 
-Mimics how GLG/AlphaSights/Third Bridge evaluate expert relevance:
-- Title/role match
-- Domain expertise signals
-- Seniority appropriateness
-- Company relevance
-- Recency/currency of experience
+Instead of strict criteria matching, we score based on:
+1. Data quality & completeness (do we have good info?)
+2. Relevance confidence (how confident are we they're relevant?)
+3. Reachability (can we actually contact them?)
+4. Verification signals (is this a real person?)
 """
 from typing import Dict, List, Tuple, Any, Optional
-import re
 
 
 class ExpertScorer:
     """
-    Score candidates like an expert network would.
+    Score candidates based on confidence in data quality and relevance.
 
-    Scoring philosophy:
-    - We're looking for EXPERTS who can provide insights, not just people with titles
-    - Seniority matters: too junior = no strategic insight, too senior = may be out of touch
-    - Domain expertise matters more than exact title match
-    - Company relevance: industry match, company size, market position
+    Philosophy: We'd rather reach out to someone with verified info
+    than skip them because their title doesn't match a rigid list.
     """
-
-    # Seniority levels and their typical scoring weight
-    SENIORITY_TIERS = {
-        "c_level": {
-            "patterns": ["ceo", "cfo", "coo", "cto", "cio", "cmo", "chief"],
-            "weight": 0.9,  # Very senior, great for strategy, may be too high-level for ops
-        },
-        "vp": {
-            "patterns": ["vp ", "vice president", "svp", "evp"],
-            "weight": 1.0,  # Ideal: strategic + operational knowledge
-        },
-        "director": {
-            "patterns": ["director", "head of"],
-            "weight": 1.0,  # Ideal: deep domain expertise
-        },
-        "senior_manager": {
-            "patterns": ["senior manager", "sr manager", "sr. manager"],
-            "weight": 0.9,
-        },
-        "manager": {
-            "patterns": ["manager"],
-            "weight": 0.7,  # Good for operational insights
-        },
-        "specialist": {
-            "patterns": ["specialist", "analyst", "coordinator", "associate"],
-            "weight": 0.5,  # May lack strategic perspective
-        },
-    }
 
     @classmethod
     def score_candidate(
@@ -58,286 +25,303 @@ class ExpertScorer:
         project: Dict[str, Any],
     ) -> Tuple[bool, float, List[str], Dict[str, Any]]:
         """
-        Score a candidate's relevance as an expert.
+        Score a candidate based on confidence we have good data.
 
         Returns: (hard_pass, score, reasons, scoring_details)
 
         Score ranges from 0-100:
-        - 80-100: Excellent match, prioritize outreach
-        - 60-79: Good match, include in outreach
-        - 40-59: Moderate match, include if list is short
-        - 20-39: Weak match, probably skip
-        - 0-19: Poor match or hard pass
+        - 80-100: High confidence - verified data, clear relevance
+        - 60-79: Good confidence - most data present, likely relevant
+        - 40-59: Moderate confidence - some gaps but worth trying
+        - 20-39: Low confidence - missing key data
+        - 0-19: Very low confidence or hard pass
         """
         reasons = []
-        scoring_details = {}
+        scores = {}
 
         # Extract candidate info
-        title = (candidate.get("title") or "").lower()
-        company = (candidate.get("company") or "").lower()
-        region = candidate.get("region") or ""
-        company_size = candidate.get("company_employee_count")
+        title = candidate.get("title") or ""
+        company = candidate.get("company") or ""
+        email = candidate.get("email") or ""
         linkedin_url = candidate.get("linkedin_url") or ""
+        company_size = candidate.get("company_employee_count")
+        region = candidate.get("region") or ""
+        full_name = candidate.get("full_name") or ""
 
         # Extract project criteria
-        titles_include = [t.lower() for t in project.get("titles_include", [])]
         titles_exclude = [t.lower() for t in project.get("titles_exclude", [])]
-        keywords = [k.lower() for k in project.get("keywords", [])]
         exclusions = [e.lower() for e in project.get("exclusions", [])]
-        regions = project.get("regions", [])
+        keywords = [k.lower() for k in project.get("keywords", [])]
         company_size_min = project.get("company_size_min")
-        seniority_signals = [s.lower() for s in project.get("seniority_signals", [])]
-        expertise_signals = [s.lower() for s in project.get("expertise_signals", [])]
 
-        # ============ HARD PASS CHECKS ============
+        # ============ HARD PASS CHECKS (only explicit exclusions) ============
         hard_pass = False
+        title_lower = title.lower()
+        company_lower = company.lower()
 
-        # Check title exclusions
         for excluded in titles_exclude:
-            if excluded in title:
+            if excluded and excluded in title_lower:
                 hard_pass = True
                 reasons.append(f"EXCLUDE: title contains '{excluded}'")
 
-        # Check company exclusions
         for exclusion in exclusions:
-            if exclusion in company:
+            if exclusion and exclusion in company_lower:
                 hard_pass = True
-                reasons.append(f"EXCLUDE: company contains '{exclusion}'")
+                reasons.append(f"EXCLUDE: company matches '{exclusion}'")
 
         if hard_pass:
             return (True, 0.0, reasons, {"hard_pass_reason": reasons})
 
-        # ============ SCORING ============
-        scores = {}
+        # ============ CONFIDENCE-BASED SCORING ============
 
-        # 1. TITLE RELEVANCE (0-35 points)
-        title_score, title_reasons = cls._score_title_relevance(
-            title, titles_include, keywords
+        # 1. DATA COMPLETENESS (0-30 points)
+        completeness_score, completeness_reasons = cls._score_data_completeness(
+            full_name, title, company, email, linkedin_url, region
         )
-        scores["title_relevance"] = title_score
-        reasons.extend(title_reasons)
+        scores["data_completeness"] = completeness_score
+        reasons.extend(completeness_reasons)
 
-        # 2. SENIORITY APPROPRIATENESS (0-20 points)
-        seniority_score, seniority_reasons = cls._score_seniority(
-            title, seniority_signals
+        # 2. REACHABILITY (0-25 points)
+        reachability_score, reachability_reasons = cls._score_reachability(
+            email, linkedin_url
         )
-        scores["seniority"] = seniority_score
-        reasons.extend(seniority_reasons)
+        scores["reachability"] = reachability_score
+        reasons.extend(reachability_reasons)
 
-        # 3. DOMAIN EXPERTISE (0-25 points)
-        expertise_score, expertise_reasons = cls._score_expertise(
-            title, company, keywords, expertise_signals
+        # 3. RELEVANCE CONFIDENCE (0-30 points)
+        relevance_score, relevance_reasons = cls._score_relevance_confidence(
+            title, company, keywords
         )
-        scores["domain_expertise"] = expertise_score
-        reasons.extend(expertise_reasons)
+        scores["relevance"] = relevance_score
+        reasons.extend(relevance_reasons)
 
-        # 4. COMPANY FIT (0-15 points)
-        company_score, company_reasons = cls._score_company_fit(
-            company, company_size, company_size_min, keywords
+        # 4. COMPANY SIGNALS (0-15 points)
+        company_score, company_reasons = cls._score_company_signals(
+            company, company_size, company_size_min
         )
-        scores["company_fit"] = company_score
+        scores["company"] = company_score
         reasons.extend(company_reasons)
-
-        # 5. REGION MATCH (0-5 points)
-        region_score, region_reasons = cls._score_region(region, regions)
-        scores["region"] = region_score
-        reasons.extend(region_reasons)
 
         # Calculate total
         total_score = sum(scores.values())
 
-        # Add scoring details for transparency
         scoring_details = {
             "component_scores": scores,
             "total": total_score,
             "recommendation": cls._get_recommendation(total_score),
+            "confidence_level": cls._get_confidence_level(total_score),
         }
 
         return (False, total_score, reasons, scoring_details)
 
     @classmethod
-    def _score_title_relevance(
-        cls, title: str, titles_include: List[str], keywords: List[str]
-    ) -> Tuple[float, List[str]]:
-        """Score how well the title matches what we're looking for."""
-        reasons = []
-        score = 0.0
-
-        # Direct title match (up to 25 points)
-        best_match = None
-        best_match_score = 0
-
-        for target_title in titles_include:
-            if target_title in title:
-                # Exact substring match
-                match_score = 25
-                if match_score > best_match_score:
-                    best_match = target_title
-                    best_match_score = match_score
-            elif cls._fuzzy_title_match(title, target_title):
-                # Fuzzy match
-                match_score = 15
-                if match_score > best_match_score:
-                    best_match = target_title
-                    best_match_score = match_score
-
-        if best_match:
-            score += best_match_score
-            reasons.append(f"title_match: '{best_match}' ({best_match_score}pts)")
-        else:
-            reasons.append("title: no direct match")
-
-        # Keyword presence in title (up to 10 points)
-        keyword_matches = [k for k in keywords if k in title]
-        if keyword_matches:
-            keyword_score = min(10, len(keyword_matches) * 5)
-            score += keyword_score
-            reasons.append(f"title_keywords: {keyword_matches} ({keyword_score}pts)")
-
-        return (score, reasons)
-
-    @classmethod
-    def _fuzzy_title_match(cls, actual: str, target: str) -> bool:
-        """Check for fuzzy title matches (handles variations)."""
-        # Common title variations
-        variations = {
-            "administrator": ["admin", "administrator"],
-            "manager": ["manager", "mgr"],
-            "director": ["director", "dir"],
-            "specialist": ["specialist", "spec"],
-            "analyst": ["analyst"],
-            "coordinator": ["coordinator", "coord"],
-            "vice president": ["vp", "vice president"],
-        }
-
-        for base, variants in variations.items():
-            if any(v in target for v in variants):
-                if any(v in actual for v in variants):
-                    return True
-
-        # Check word overlap
-        target_words = set(target.split())
-        actual_words = set(actual.split())
-        overlap = target_words & actual_words
-
-        return len(overlap) >= 2
-
-    @classmethod
-    def _score_seniority(
-        cls, title: str, seniority_signals: List[str]
-    ) -> Tuple[float, List[str]]:
-        """Score seniority appropriateness."""
-        reasons = []
-
-        # Detect seniority tier
-        detected_tier = None
-        for tier_name, tier_info in cls.SENIORITY_TIERS.items():
-            for pattern in tier_info["patterns"]:
-                if pattern in title:
-                    detected_tier = tier_name
-                    break
-            if detected_tier:
-                break
-
-        if detected_tier:
-            weight = cls.SENIORITY_TIERS[detected_tier]["weight"]
-            score = 20 * weight
-            reasons.append(f"seniority: {detected_tier} ({score:.0f}pts)")
-        else:
-            # Unknown seniority, give partial credit
-            score = 10
-            reasons.append("seniority: unknown (10pts)")
-
-        return (score, reasons)
-
-    @classmethod
-    def _score_expertise(
+    def _score_data_completeness(
         cls,
+        full_name: str,
         title: str,
         company: str,
-        keywords: List[str],
-        expertise_signals: List[str],
+        email: str,
+        linkedin_url: str,
+        region: str,
     ) -> Tuple[float, List[str]]:
-        """Score domain expertise signals."""
+        """Score based on how complete the candidate data is."""
         reasons = []
         score = 0.0
-        combined = f"{title} {company}"
 
-        # Keyword matches (up to 15 points)
-        keyword_matches = [k for k in keywords if k in combined]
-        if keyword_matches:
-            keyword_score = min(15, len(keyword_matches) * 5)
-            score += keyword_score
-            reasons.append(f"expertise_keywords: {keyword_matches} ({keyword_score}pts)")
+        # Name (required - 5 points)
+        if full_name and len(full_name.split()) >= 2:
+            score += 5
+            reasons.append("name: full name present (5pts)")
+        elif full_name:
+            score += 2
+            reasons.append("name: partial name (2pts)")
+        else:
+            reasons.append("name: missing (0pts)")
 
-        # Expertise signal matches (up to 10 points)
-        signal_matches = [s for s in expertise_signals if s in combined]
-        if signal_matches:
-            signal_score = min(10, len(signal_matches) * 5)
-            score += signal_score
-            reasons.append(f"expertise_signals: {signal_matches} ({signal_score}pts)")
+        # Title (important - 8 points)
+        if title and len(title) > 3:
+            score += 8
+            reasons.append("title: present (8pts)")
+        else:
+            reasons.append("title: missing (0pts)")
 
-        if not keyword_matches and not signal_matches:
-            reasons.append("expertise: no keyword/signal matches")
+        # Company (important - 8 points)
+        if company and len(company) > 2:
+            score += 8
+            reasons.append("company: present (8pts)")
+        else:
+            reasons.append("company: missing (0pts)")
+
+        # Email (critical - 5 points, scored separately in reachability)
+        # LinkedIn (valuable - 4 points)
+        if linkedin_url:
+            score += 4
+            reasons.append("linkedin: present (4pts)")
+
+        # Region (nice to have - 5 points)
+        if region:
+            score += 5
+            reasons.append("region: present (5pts)")
 
         return (score, reasons)
 
     @classmethod
-    def _score_company_fit(
+    def _score_reachability(
+        cls, email: str, linkedin_url: str
+    ) -> Tuple[float, List[str]]:
+        """Score based on how confident we are we can reach them."""
+        reasons = []
+        score = 0.0
+
+        # Email is critical
+        if email:
+            # Check email quality
+            if "@" in email and "." in email.split("@")[-1]:
+                # Looks like valid email format
+                if cls._is_business_email(email):
+                    score += 20
+                    reasons.append("email: business email (20pts)")
+                else:
+                    score += 12
+                    reasons.append("email: personal email (12pts)")
+            else:
+                score += 5
+                reasons.append("email: questionable format (5pts)")
+        else:
+            reasons.append("email: missing (0pts)")
+
+        # LinkedIn as backup contact
+        if linkedin_url and "linkedin.com" in linkedin_url.lower():
+            score += 5
+            reasons.append("linkedin: valid URL (5pts)")
+
+        return (score, reasons)
+
+    @classmethod
+    def _is_business_email(cls, email: str) -> bool:
+        """Check if email appears to be a business email."""
+        personal_domains = [
+            "gmail.com", "yahoo.com", "hotmail.com", "outlook.com",
+            "aol.com", "icloud.com", "mail.com", "protonmail.com"
+        ]
+        domain = email.lower().split("@")[-1]
+        return domain not in personal_domains
+
+    @classmethod
+    def _score_relevance_confidence(
+        cls, title: str, company: str, keywords: List[str]
+    ) -> Tuple[float, List[str]]:
+        """
+        Score how confident we are the person is relevant.
+
+        More lenient than strict matching - we give points for:
+        - Any keyword overlap (they're in the space)
+        - Having a substantive title (not just "Employee")
+        - Company name suggesting relevance
+        """
+        reasons = []
+        score = 0.0
+        combined = f"{title} {company}".lower()
+
+        # Keyword matches (up to 20 points)
+        if keywords:
+            keyword_matches = [k for k in keywords if k in combined]
+            if keyword_matches:
+                # More matches = more confidence
+                match_score = min(20, len(keyword_matches) * 7)
+                score += match_score
+                reasons.append(f"keywords: {len(keyword_matches)} matches ({match_score}pts)")
+            else:
+                # No keyword match, but don't penalize too hard
+                # They might still be relevant
+                score += 5
+                reasons.append("keywords: no direct match, but may be relevant (5pts)")
+        else:
+            # No keywords defined, give benefit of doubt
+            score += 15
+            reasons.append("keywords: none specified (15pts)")
+
+        # Title substance check (up to 10 points)
+        title_lower = title.lower()
+        if title:
+            # Check for substantive roles
+            substantive_indicators = [
+                "director", "manager", "head", "lead", "chief", "vp",
+                "president", "founder", "owner", "editor", "publisher",
+                "specialist", "analyst", "consultant", "advisor", "expert",
+                "senior", "principal", "executive"
+            ]
+            if any(ind in title_lower for ind in substantive_indicators):
+                score += 10
+                reasons.append("title: substantive role (10pts)")
+            elif len(title) > 5:
+                score += 5
+                reasons.append("title: has role description (5pts)")
+
+        return (score, reasons)
+
+    @classmethod
+    def _score_company_signals(
         cls,
         company: str,
         company_size: Optional[int],
         company_size_min: Optional[int],
-        keywords: List[str],
     ) -> Tuple[float, List[str]]:
-        """Score company relevance."""
+        """Score based on company signals."""
         reasons = []
         score = 0.0
 
-        # Company size check (up to 10 points)
+        # Company exists
+        if company:
+            score += 5
+            reasons.append("company: identified (5pts)")
+
+        # Company size
         if company_size_min:
             if company_size and company_size >= company_size_min:
                 score += 10
-                reasons.append(f"company_size: {company_size} >= {company_size_min} (10pts)")
+                reasons.append(f"company_size: {company_size} meets minimum (10pts)")
             elif company_size:
-                reasons.append(f"company_size: {company_size} < {company_size_min} (0pts)")
+                # Below minimum but we have data
+                ratio = company_size / company_size_min
+                partial = int(5 * ratio)
+                score += partial
+                reasons.append(f"company_size: {company_size} below minimum ({partial}pts)")
             else:
-                score += 5  # Unknown size, give partial credit
+                # Unknown size - give partial credit
+                score += 5
                 reasons.append("company_size: unknown (5pts)")
         else:
+            # No size requirement
             score += 5
-
-        # Company name contains keywords (up to 5 points)
-        company_keyword_matches = [k for k in keywords if k in company]
-        if company_keyword_matches:
-            score += 5
-            reasons.append(f"company_keywords: {company_keyword_matches} (5pts)")
+            reasons.append("company_size: no requirement (5pts)")
 
         return (score, reasons)
 
     @classmethod
-    def _score_region(
-        cls, region: str, required_regions: List[str]
-    ) -> Tuple[float, List[str]]:
-        """Score region match."""
-        if not required_regions:
-            return (5, ["region: no requirement (5pts)"])
-
-        if region in required_regions:
-            return (5, [f"region: {region} matches (5pts)"])
-
-        return (0, [f"region: {region} not in {required_regions} (0pts)"])
+    def _get_recommendation(cls, score: float) -> str:
+        """Get outreach recommendation based on confidence score."""
+        if score >= 80:
+            return "HIGH CONFIDENCE - Verified data, reach out"
+        elif score >= 60:
+            return "GOOD CONFIDENCE - Data looks solid, include in outreach"
+        elif score >= 40:
+            return "MODERATE CONFIDENCE - Some gaps, but worth trying"
+        elif score >= 20:
+            return "LOW CONFIDENCE - Missing key data, review manually"
+        else:
+            return "VERY LOW CONFIDENCE - Likely missing critical data"
 
     @classmethod
-    def _get_recommendation(cls, score: float) -> str:
-        """Get outreach recommendation based on score."""
+    def _get_confidence_level(cls, score: float) -> str:
+        """Get simple confidence level label."""
         if score >= 80:
-            return "PRIORITY - Excellent match, prioritize outreach"
+            return "high"
         elif score >= 60:
-            return "INCLUDE - Good match, include in outreach"
+            return "good"
         elif score >= 40:
-            return "MAYBE - Moderate match, include if list is short"
+            return "moderate"
         elif score >= 20:
-            return "WEAK - Poor match, probably skip"
+            return "low"
         else:
-            return "SKIP - Not a match"
+            return "very_low"
