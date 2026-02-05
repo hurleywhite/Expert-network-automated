@@ -81,3 +81,28 @@ export interface SendResponse {
   jobs_enqueued: number;
   actor: string;
 }
+
+export interface ApprovedDraft {
+  draft_id: string;
+  candidate_id: string;
+  candidate_name: string;
+  candidate_title: string;
+  candidate_company: string;
+  candidate_email: string;
+  subject: string;
+  approved_at: string | null;
+  approved_by: string | null;
+  status: 'approved' | 'sent';
+}
+
+export interface ApprovedDraftsResponse {
+  project_id: string;
+  approved: {
+    count: number;
+    drafts: ApprovedDraft[];
+  };
+  sent: {
+    count: number;
+    drafts: ApprovedDraft[];
+  };
+}

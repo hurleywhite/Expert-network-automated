@@ -353,3 +353,72 @@ def get_pipeline_status(
     if "error" in result:
         raise HTTPException(status_code=404, detail=result["error"])
     return result
+
+
+@router.get("/{project_id}/approved-drafts")
+def get_approved_drafts(
+    project_id: UUID,
+    db: Session = Depends(get_db),
+):
+    """
+    Get all approved and sent drafts for a project.
+
+    Returns drafts grouped by status:
+    - approved: Approved but not yet sent
+    - sent: Successfully sent
+    """
+    # Get approved drafts
+    approved_drafts = (
+        db.query(models.MessageDraft)
+        .filter(
+            models.MessageDraft.project_id == project_id,
+            models.MessageDraft.approved_at != None,
+        )
+        .all()
+    )
+
+    # Get sent draft IDs
+    sent_draft_ids = set(
+        row[0] for row in db.query(models.OutboundEvent.message_draft_id)
+        .filter(
+            models.OutboundEvent.project_id == project_id,
+            models.OutboundEvent.status == models.OutboundEventStatus.SENT,
+        )
+        .all()
+    )
+
+    approved_not_sent = []
+    sent = []
+
+    for draft in approved_drafts:
+        candidate = crud.get_candidate(db, draft.candidate_id)
+        draft_info = {
+            "draft_id": str(draft.id),
+            "candidate_id": str(draft.candidate_id),
+            "candidate_name": candidate.full_name if candidate else "Unknown",
+            "candidate_title": candidate.title if candidate else "",
+            "candidate_company": candidate.company if candidate else "",
+            "candidate_email": candidate.email if candidate else "",
+            "subject": draft.subject,
+            "approved_at": draft.approved_at.isoformat() if draft.approved_at else None,
+            "approved_by": draft.approved_by,
+        }
+
+        if draft.id in sent_draft_ids:
+            draft_info["status"] = "sent"
+            sent.append(draft_info)
+        else:
+            draft_info["status"] = "approved"
+            approved_not_sent.append(draft_info)
+
+    return {
+        "project_id": str(project_id),
+        "approved": {
+            "count": len(approved_not_sent),
+            "drafts": approved_not_sent,
+        },
+        "sent": {
+            "count": len(sent),
+            "drafts": sent,
+        },
+    }

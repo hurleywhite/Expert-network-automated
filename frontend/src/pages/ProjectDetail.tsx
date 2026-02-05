@@ -1,7 +1,7 @@
 import { useState, useEffect, useCallback } from 'react';
 import { useParams, Link } from 'react-router-dom';
 import { projectsApi, draftsApi } from '../api/client';
-import type { Project, PipelineStatus, ReviewQueue } from '../types';
+import type { Project, PipelineStatus, ReviewQueue, ApprovedDraftsResponse } from '../types';
 import StatusCard from '../components/StatusCard';
 import DraftCard from '../components/DraftCard';
 
@@ -17,6 +17,7 @@ export default function ProjectDetail() {
   const [project, setProject] = useState<Project | null>(null);
   const [status, setStatus] = useState<PipelineStatus | null>(null);
   const [reviewQueue, setReviewQueue] = useState<ReviewQueue | null>(null);
+  const [approvedDrafts, setApprovedDrafts] = useState<ApprovedDraftsResponse | null>(null);
   const [loading, setLoading] = useState(true);
   const [error, setError] = useState<string | null>(null);
   const [approvingDraft, setApprovingDraft] = useState<string | null>(null);
@@ -30,14 +31,16 @@ export default function ProjectDetail() {
 
     try {
       setLoading(true);
-      const [projectData, statusData, queueData] = await Promise.all([
+      const [projectData, statusData, queueData, approvedData] = await Promise.all([
         projectsApi.get(projectId),
         projectsApi.getStatus(projectId),
         projectsApi.getReviewQueue(projectId),
+        projectsApi.getApprovedDrafts(projectId),
       ]);
       setProject(projectData);
       setStatus(statusData);
       setReviewQueue(queueData);
+      setApprovedDrafts(approvedData);
       setError(null);
     } catch (err) {
       setError('Failed to load project data');
@@ -389,11 +392,11 @@ export default function ProjectDetail() {
         </div>
       )}
 
-      {/* Empty State */}
-      {reviewQueue && reviewQueue.total_pending === 0 && (
+      {/* Empty State for Pending */}
+      {reviewQueue && reviewQueue.total_pending === 0 && !approvedDrafts?.approved.count && !approvedDrafts?.sent.count && (
         <div className="bg-white rounded-lg shadow border border-gray-200 p-8 text-center">
           <svg
-            className="mx-auto h-12 w-12 text-green-400"
+            className="mx-auto h-12 w-12 text-gray-400"
             fill="none"
             viewBox="0 0 24 24"
             stroke="currentColor"
@@ -402,16 +405,77 @@ export default function ProjectDetail() {
               strokeLinecap="round"
               strokeLinejoin="round"
               strokeWidth={2}
-              d="M9 12l2 2 4-4m6 2a9 9 0 11-18 0 9 9 0 0118 0z"
+              d="M9 12h6m-6 4h6m2 5H7a2 2 0 01-2-2V5a2 2 0 012-2h5.586a1 1 0 01.707.293l5.414 5.414a1 1 0 01.293.707V19a2 2 0 01-2 2z"
             />
           </svg>
           <h3 className="mt-4 text-lg font-medium text-gray-900">
-            No pending drafts
+            No drafts yet
           </h3>
           <p className="mt-2 text-sm text-gray-500">
-            All drafts have been reviewed. Check the pipeline status for next
-            steps.
+            Generate drafts for qualified candidates to get started.
           </p>
+        </div>
+      )}
+
+      {/* Approved Drafts Section */}
+      {approvedDrafts && approvedDrafts.approved.count > 0 && (
+        <div className="mt-8">
+          <h2 className="text-lg font-semibold text-gray-900 mb-4 flex items-center">
+            <span className="inline-flex items-center justify-center w-6 h-6 rounded-full bg-green-100 text-green-600 text-sm font-bold mr-2">
+              {approvedDrafts.approved.count}
+            </span>
+            Approved (Ready to Send)
+          </h2>
+          <div className="bg-white rounded-lg shadow border border-green-200 divide-y divide-gray-100">
+            {approvedDrafts.approved.drafts.map((draft) => (
+              <div key={draft.draft_id} className="p-4">
+                <div className="flex items-center justify-between">
+                  <div>
+                    <p className="font-medium text-gray-900">{draft.candidate_name}</p>
+                    <p className="text-sm text-gray-600">{draft.candidate_title} at {draft.candidate_company}</p>
+                    <p className="text-sm text-gray-500">{draft.candidate_email}</p>
+                  </div>
+                  <span className="inline-flex items-center px-2.5 py-0.5 rounded-full text-xs font-medium bg-green-100 text-green-800">
+                    Approved
+                  </span>
+                </div>
+                <p className="mt-2 text-sm text-gray-700">
+                  <span className="font-medium">Subject:</span> {draft.subject}
+                </p>
+              </div>
+            ))}
+          </div>
+        </div>
+      )}
+
+      {/* Sent Drafts Section */}
+      {approvedDrafts && approvedDrafts.sent.count > 0 && (
+        <div className="mt-8">
+          <h2 className="text-lg font-semibold text-gray-900 mb-4 flex items-center">
+            <span className="inline-flex items-center justify-center w-6 h-6 rounded-full bg-blue-100 text-blue-600 text-sm font-bold mr-2">
+              {approvedDrafts.sent.count}
+            </span>
+            Sent
+          </h2>
+          <div className="bg-white rounded-lg shadow border border-blue-200 divide-y divide-gray-100">
+            {approvedDrafts.sent.drafts.map((draft) => (
+              <div key={draft.draft_id} className="p-4">
+                <div className="flex items-center justify-between">
+                  <div>
+                    <p className="font-medium text-gray-900">{draft.candidate_name}</p>
+                    <p className="text-sm text-gray-600">{draft.candidate_title} at {draft.candidate_company}</p>
+                    <p className="text-sm text-gray-500">{draft.candidate_email}</p>
+                  </div>
+                  <span className="inline-flex items-center px-2.5 py-0.5 rounded-full text-xs font-medium bg-blue-100 text-blue-800">
+                    Sent
+                  </span>
+                </div>
+                <p className="mt-2 text-sm text-gray-700">
+                  <span className="font-medium">Subject:</span> {draft.subject}
+                </p>
+              </div>
+            ))}
+          </div>
         </div>
       )}
     </div>

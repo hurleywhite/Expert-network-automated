@@ -6,6 +6,7 @@ import type {
   ApprovalResponse,
   BulkApproveResponse,
   SendResponse,
+  ApprovedDraftsResponse,
 } from '../types';
 
 const API_URL = import.meta.env.VITE_API_URL || 'http://localhost:8000';
@@ -52,6 +53,11 @@ export const projectsApi = {
       actor,
       limit,
     });
+    return response.data;
+  },
+
+  getApprovedDrafts: async (id: string): Promise<ApprovedDraftsResponse> => {
+    const response = await api.get(`/projects/${id}/approved-drafts`);
     return response.data;
   },
 };
