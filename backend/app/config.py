@@ -16,13 +16,13 @@ class Settings(BaseSettings):
 
     # Email Provider (Resend - recommended)
     resend_api_key: str = ""
-    resend_from_email: str = "outreach@example.com"
-    resend_from_name: str = "Expert Outreach"
+    resend_from_email: str = "outreach@arcticblue-outreach.com"
+    resend_from_name: str = "Arctic Blue Research"
 
     # Email Provider (SendGrid - legacy)
     sendgrid_api_key: str = ""
-    sendgrid_from_email: str = "outreach@example.com"
-    sendgrid_from_name: str = "Expert Outreach"
+    sendgrid_from_email: str = "outreach@arcticblue-outreach.com"
+    sendgrid_from_name: str = "Arctic Blue Research"
     sendgrid_webhook_verification_key: str = ""  # For SendGrid signed webhooks
     sendgrid_inbound_domain: str = ""  # e.g., parse.yourdomain.com
 
