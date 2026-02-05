@@ -110,7 +110,7 @@ I'm doing targeted research on [TOPIC] to inform an internal analysis. Would you
 We'd keep it tight — mainly:
 • How [CUSTOMERS/TEAMS] evaluate [THING] and what actually drives decisions
 • Common pitfalls / failure modes you've seen in [PROCESS]
-• What's changing in [MARKET/REGULATION/TECH] over the next 12–18 months
+• What's changing in [MARKET/REGULATION/TECH] in the near future
 
 No prep required. And we can offer $[RATE] for 30 min (varies by experience), for your time.
 
@@ -167,7 +167,7 @@ I'm doing targeted research on {research_topic} to inform an internal analysis. 
 We'd keep it tight — mainly:
 • How teams evaluate solutions and what actually drives decisions
 • Common pitfalls / failure modes you've seen
-• What's changing in the market over the next 12–18 months
+• What's changing in the market in the near future
 
 No prep required. And we can offer ${rate_range} for 30 min (varies by experience), for your time.
 
