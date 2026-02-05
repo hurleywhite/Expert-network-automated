@@ -1,7 +1,7 @@
 import { useState, useEffect, useCallback } from 'react';
 import { useParams, Link } from 'react-router-dom';
 import { projectsApi, draftsApi } from '../api/client';
-import type { Project, PipelineStatus, ReviewQueue, ApprovedDraftsResponse } from '../types';
+import type { Project, PipelineStatus, ReviewQueue, ApprovedDraftsResponse, ProjectCandidatesResponse } from '../types';
 import StatusCard from '../components/StatusCard';
 import DraftCard from '../components/DraftCard';
 
@@ -18,6 +18,8 @@ export default function ProjectDetail() {
   const [status, setStatus] = useState<PipelineStatus | null>(null);
   const [reviewQueue, setReviewQueue] = useState<ReviewQueue | null>(null);
   const [approvedDrafts, setApprovedDrafts] = useState<ApprovedDraftsResponse | null>(null);
+  const [candidates, setCandidates] = useState<ProjectCandidatesResponse | null>(null);
+  const [showCandidates, setShowCandidates] = useState(false);
   const [loading, setLoading] = useState(true);
   const [error, setError] = useState<string | null>(null);
   const [approvingDraft, setApprovingDraft] = useState<string | null>(null);
@@ -31,16 +33,18 @@ export default function ProjectDetail() {
 
     try {
       setLoading(true);
-      const [projectData, statusData, queueData, approvedData] = await Promise.all([
+      const [projectData, statusData, queueData, approvedData, candidatesData] = await Promise.all([
         projectsApi.get(projectId),
         projectsApi.getStatus(projectId),
         projectsApi.getReviewQueue(projectId),
         projectsApi.getApprovedDrafts(projectId),
+        projectsApi.getCandidates(projectId),
       ]);
       setProject(projectData);
       setStatus(statusData);
       setReviewQueue(queueData);
       setApprovedDrafts(approvedData);
+      setCandidates(candidatesData);
       setError(null);
     } catch (err) {
       setError('Failed to load project data');
@@ -239,6 +243,88 @@ export default function ProjectDetail() {
           {status.next_action && (
             <div className="mt-4 bg-blue-50 border border-blue-200 rounded-lg p-4 text-blue-800 text-sm">
               <span className="font-medium">Next step:</span> {status.next_action}
+            </div>
+          )}
+        </div>
+      )}
+
+      {/* Candidates List */}
+      {candidates && candidates.total > 0 && (
+        <div className="mb-8">
+          <button
+            onClick={() => setShowCandidates(!showCandidates)}
+            className="flex items-center justify-between w-full text-left"
+          >
+            <h2 className="text-lg font-semibold text-gray-900 flex items-center">
+              <span className="inline-flex items-center justify-center w-6 h-6 rounded-full bg-blue-100 text-blue-600 text-sm font-bold mr-2">
+                {candidates.total}
+              </span>
+              Scored Candidates
+            </h2>
+            <svg
+              className={`w-5 h-5 text-gray-500 transition-transform ${showCandidates ? 'rotate-180' : ''}`}
+              fill="none"
+              stroke="currentColor"
+              viewBox="0 0 24 24"
+            >
+              <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M19 9l-7 7-7-7" />
+            </svg>
+          </button>
+
+          {showCandidates && (
+            <div className="mt-4 bg-white rounded-lg shadow border border-gray-200 overflow-hidden">
+              <table className="min-w-full divide-y divide-gray-200">
+                <thead className="bg-gray-50">
+                  <tr>
+                    <th className="px-4 py-3 text-left text-xs font-medium text-gray-500 uppercase tracking-wider">Name</th>
+                    <th className="px-4 py-3 text-left text-xs font-medium text-gray-500 uppercase tracking-wider">Title</th>
+                    <th className="px-4 py-3 text-left text-xs font-medium text-gray-500 uppercase tracking-wider">Company</th>
+                    <th className="px-4 py-3 text-left text-xs font-medium text-gray-500 uppercase tracking-wider">Email</th>
+                    <th className="px-4 py-3 text-left text-xs font-medium text-gray-500 uppercase tracking-wider">Score</th>
+                  </tr>
+                </thead>
+                <tbody className="bg-white divide-y divide-gray-200">
+                  {candidates.candidates.map((candidate) => (
+                    <tr key={candidate.candidate_id} className={candidate.hard_pass ? 'bg-red-50' : ''}>
+                      <td className="px-4 py-3 whitespace-nowrap">
+                        <div className="text-sm font-medium text-gray-900">{candidate.full_name}</div>
+                        {candidate.linkedin_url && (
+                          <a
+                            href={candidate.linkedin_url}
+                            target="_blank"
+                            rel="noopener noreferrer"
+                            className="text-xs text-blue-600 hover:underline"
+                          >
+                            LinkedIn
+                          </a>
+                        )}
+                      </td>
+                      <td className="px-4 py-3 whitespace-nowrap text-sm text-gray-600">{candidate.title}</td>
+                      <td className="px-4 py-3 whitespace-nowrap text-sm text-gray-600">{candidate.company}</td>
+                      <td className="px-4 py-3 whitespace-nowrap text-sm">
+                        {candidate.email ? (
+                          <span className="text-gray-600">{candidate.email}</span>
+                        ) : (
+                          <span className="text-gray-400 italic">No email</span>
+                        )}
+                      </td>
+                      <td className="px-4 py-3 whitespace-nowrap">
+                        <span className={`inline-flex items-center px-2.5 py-0.5 rounded-full text-xs font-medium ${
+                          candidate.hard_pass
+                            ? 'bg-red-100 text-red-800'
+                            : candidate.score >= 60
+                            ? 'bg-green-100 text-green-800'
+                            : candidate.score >= 40
+                            ? 'bg-yellow-100 text-yellow-800'
+                            : 'bg-gray-100 text-gray-800'
+                        }`}>
+                          {candidate.score}
+                        </span>
+                      </td>
+                    </tr>
+                  ))}
+                </tbody>
+              </table>
             </div>
           )}
         </div>

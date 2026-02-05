@@ -106,3 +106,22 @@ export interface ApprovedDraftsResponse {
     drafts: ApprovedDraft[];
   };
 }
+
+export interface ScoredCandidate {
+  candidate_id: string;
+  full_name: string;
+  title: string;
+  company: string;
+  email: string | null;
+  linkedin_url: string | null;
+  region: string | null;
+  score: number;
+  hard_pass: boolean;
+  reasons: string[];
+}
+
+export interface ProjectCandidatesResponse {
+  project_id: string;
+  total: number;
+  candidates: ScoredCandidate[];
+}

@@ -422,3 +422,49 @@ def get_approved_drafts(
             "drafts": sent,
         },
     }
+
+
+@router.get("/{project_id}/candidates")
+def get_project_candidates(
+    project_id: UUID,
+    db: Session = Depends(get_db),
+):
+    """
+    Get all scored candidates for a project.
+
+    Returns candidates with their scores, sorted by score descending.
+    """
+    project = crud.get_project(db, project_id)
+    if not project:
+        raise HTTPException(status_code=404, detail="Project not found")
+
+    # Get all scores for this project with candidate info
+    scores = (
+        db.query(models.CandidateScore)
+        .filter(models.CandidateScore.project_id == project_id)
+        .order_by(models.CandidateScore.score.desc())
+        .all()
+    )
+
+    candidates = []
+    for score in scores:
+        candidate = crud.get_candidate(db, score.candidate_id)
+        if candidate:
+            candidates.append({
+                "candidate_id": str(candidate.id),
+                "full_name": candidate.full_name,
+                "title": candidate.title,
+                "company": candidate.company,
+                "email": candidate.email,
+                "linkedin_url": candidate.linkedin_url,
+                "region": candidate.region,
+                "score": score.score,
+                "hard_pass": score.hard_pass,
+                "reasons": score.reasons or [],
+            })
+
+    return {
+        "project_id": str(project_id),
+        "total": len(candidates),
+        "candidates": candidates,
+    }
