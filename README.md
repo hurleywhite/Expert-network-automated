@@ -1,501 +1,193 @@
 # Expert Outreach System
 
-A production-oriented FastAPI backend for expert outreach with LLM-assisted message drafting and strict anti-hallucination guardrails.
+An automated expert network outreach platform with AI-powered candidate sourcing, scoring, and personalized email drafting.
 
 ## Features
 
-- **Project Briefs**: Define structured criteria for expert sourcing
-- **Candidate Management**: Store and track expert candidates
-- **LLM Message Drafting**: AI-assisted personalized outreach with Claude
-- **Anti-Hallucination Guardrails**: Strict validation to prevent fabricated claims
-- **Human Approval Workflow**: Review and approve before sending
-- **Email Integration**: SendGrid for reliable delivery
-- **Reply Ingestion**: Webhook for inbound replies with intent classification
-- **Do-Not-Contact**: Global suppression list with automatic enforcement
-- **Audit Logs**: Track all actions for compliance
-- **Background Jobs**: RQ worker for async processing
+- **Natural Language Project Creation**: Describe who you're looking for in plain English
+- **Apollo.io Integration**: Automatic candidate sourcing and enrichment
+- **LLM-Powered Scoring**: Claude AI evaluates candidate fit with semantic understanding
+- **Geographic Filtering**: Automatically excludes candidates outside target regions
+- **Industry-Specific Search**: Organization keyword filtering ensures relevant companies
+- **Personalized Draft Generation**: AI-written outreach emails with anti-hallucination guardrails
+- **Human Approval Workflow**: Review and approve drafts before sending
+- **Email Delivery**: Resend integration for reliable sending
+- **React Dashboard**: Modern UI for managing projects and reviewing drafts
 
 ## Tech Stack
 
-- **Python 3.11** + **FastAPI**
-- **PostgreSQL** for persistence
-- **Redis** + **RQ** for background jobs
-- **SQLAlchemy 2.x** + **Alembic** migrations
-- **SendGrid** for email delivery
-- **Anthropic Claude** for LLM drafting
-- **Docker Compose** for local development
+- **Backend**: Python 3.11 + FastAPI
+- **Frontend**: React + TypeScript + Tailwind CSS
+- **Database**: PostgreSQL
+- **Cache/Queue**: Redis + RQ
+- **AI**: Anthropic Claude (scoring & drafts)
+- **Sourcing**: Apollo.io API
+- **Email**: Resend
+- **Infrastructure**: Docker Compose
 
 ## Quick Start
 
 ### Prerequisites
 
-- Docker and Docker Compose
-- (Optional) SendGrid API key for real email sending
-- (Optional) Anthropic API key for real LLM drafting
+- Docker and Docker Compose installed
+- API keys for: Apollo.io, Anthropic (Claude), Resend
 
-### 1. Clone and Setup
+### 1. Clone the Repository
 
 ```bash
-cd expert-outreach
-cp .env.example .env
+git clone https://github.com/hurleywhite/Expert-network-automated.git
+cd Expert-network-automated
 ```
 
-Edit `.env` and add your API keys (optional for development):
+### 2. Configure API Keys
+
+```bash
+cp backend/.env.example backend/.env
+```
+
+Edit `backend/.env` with your API keys:
 
 ```env
-API_KEY=my-secure-api-key
-WEBHOOK_SECRET=my-webhook-secret
-SENDGRID_API_KEY=SG.your_key_here
-ANTHROPIC_API_KEY=sk-ant-your_key_here
+# Apollo.io API (for candidate sourcing & enrichment)
+APOLLO_API_KEY=your_apollo_api_key_here
+
+# Anthropic Claude API (for LLM scoring & draft generation)
+ANTHROPIC_API_KEY=sk-ant-your_anthropic_api_key_here
+
+# Resend API (for sending emails)
+RESEND_API_KEY=re_your_resend_api_key_here
+RESEND_FROM_EMAIL=outreach@yourdomain.com
+RESEND_FROM_NAME=Your Company Name
 ```
 
-### 2. Start Services
+### 3. Start the System
 
 ```bash
 docker compose up -d
 ```
 
-This will start:
+This starts:
 - PostgreSQL (port 5432)
 - Redis (port 6379)
 - Backend API (port 8000)
-- RQ Worker
+- Frontend Dashboard (port 3000)
+- Background Worker
 
-### 3. Verify
+### 4. Access the Dashboard
+
+Open **http://localhost:3000** in your browser.
+
+### 5. Verify API Health
 
 ```bash
 curl http://localhost:8000/health
 ```
 
-Should return: `{"status":"healthy"}`
+## Usage
 
-### 4. View API Docs
-
-Open http://localhost:8000/docs for interactive OpenAPI documentation.
-
-## API Examples
-
-All non-webhook endpoints require the `X-API-Key` header.
-
-### Create a Project
+### Create a Project (Natural Language)
 
 ```bash
-curl -X POST http://localhost:8000/projects \
+curl -X POST http://localhost:8000/projects/from-description \
   -H "Content-Type: application/json" \
   -H "X-API-Key: dev-api-key-change-in-production" \
-  -d '{
-    "name": "AI Safety Consultants",
-    "industry": "Technology",
-    "subvertical": "Artificial Intelligence",
-    "company_size_min": 50,
-    "regions": ["US-West", "US-East"],
-    "titles_include": ["Director", "VP", "Head of AI", "Chief AI Officer"],
-    "titles_exclude": ["Intern", "Junior"],
-    "keywords": ["machine learning", "AI safety", "alignment"],
-    "exclusions": ["competitor-name"]
-  }'
+  -d '{"description": "Find 10 fintech leaders (C-suite, VPs) in NYC", "created_by": "Your Name"}'
 ```
 
-Response:
-```json
-{
-  "id": "123e4567-e89b-12d3-a456-426614174000",
-  "name": "AI Safety Consultants",
-  ...
-}
-```
-
-### Bulk Ingest Candidates
+### Import Candidates
 
 ```bash
-curl -X POST http://localhost:8000/candidates/bulk \
+curl -X POST http://localhost:8000/sourcing/import/{PROJECT_ID}/from-brief \
   -H "Content-Type: application/json" \
   -H "X-API-Key: dev-api-key-change-in-production" \
-  -d '{
-    "candidates": [
-      {
-        "full_name": "Jane Smith",
-        "first_name": "Jane",
-        "last_name": "Smith",
-        "title": "VP of Engineering",
-        "company": "TechCorp",
-        "company_employee_count": 500,
-        "region": "US-West",
-        "linkedin_url": "https://linkedin.com/in/janesmith",
-        "email": "jane.smith@techcorp.com",
-        "source_name": "linkedin",
-        "source_url": "https://linkedin.com/in/janesmith"
-      }
-    ]
-  }'
+  -d '{"locations": ["New York, NY"], "seniorities": ["c_suite", "vp"], "max_results": 15}'
 ```
 
-### Score a Candidate
+### Enrich Candidates (Get Emails)
 
 ```bash
-PROJECT_ID="123e4567-e89b-12d3-a456-426614174000"
-CANDIDATE_ID="987e6543-e21b-34d5-b678-123456789abc"
-
-curl -X POST "http://localhost:8000/projects/$PROJECT_ID/candidates/$CANDIDATE_ID/score" \
+curl -X POST http://localhost:8000/sourcing/enrich-project/{PROJECT_ID}?limit=15 \
   -H "X-API-Key: dev-api-key-change-in-production"
 ```
 
-Response:
-```json
-{
-  "job_id": "abc123",
-  "message": "Scoring job enqueued for candidate ..."
-}
-```
-
-### Draft a Message
+### Score Candidates
 
 ```bash
-curl -X POST "http://localhost:8000/projects/$PROJECT_ID/candidates/$CANDIDATE_ID/draft" \
+curl -X POST http://localhost:8000/projects/{PROJECT_ID}/score-all \
   -H "X-API-Key: dev-api-key-change-in-production"
 ```
 
-Response:
-```json
-{
-  "job_id": "def456",
-  "message": "Drafting job enqueued for candidate ..."
-}
-```
-
-### Approve a Draft
+### Generate Drafts
 
 ```bash
-DRAFT_ID="456e7890-f12b-34c5-d678-901234567def"
-
-curl -X POST "http://localhost:8000/drafts/$DRAFT_ID/approve" \
+curl -X POST http://localhost:8000/projects/{PROJECT_ID}/draft-with-context \
   -H "Content-Type: application/json" \
   -H "X-API-Key: dev-api-key-change-in-production" \
   -d '{
-    "approved_by": "alice@company.com"
+    "outreach_context": {
+      "research_topic": "fintech industry trends",
+      "rate_range": "500 dollars",
+      "sender_name": "Your Name",
+      "sender_title": "Research Director"
+    },
+    "min_score": 50
   }'
 ```
 
-### Send an Approved Draft
+## API Endpoints
+
+| Endpoint | Method | Description |
+|----------|--------|-------------|
+| `/projects/from-description` | POST | Create project from natural language |
+| `/projects/{id}/status` | GET | Get project pipeline status |
+| `/projects/{id}/candidates` | GET | List scored candidates |
+| `/projects/{id}/review-queue` | GET | Get drafts pending review |
+| `/projects/{id}/score-all` | POST | Score all candidates |
+| `/projects/{id}/draft-with-context` | POST | Generate personalized drafts |
+| `/sourcing/import/{id}/from-brief` | POST | Import candidates from Apollo |
+| `/sourcing/enrich-project/{id}` | POST | Enrich candidates with emails |
+
+## Common Commands
 
 ```bash
-curl -X POST "http://localhost:8000/drafts/$DRAFT_ID/send" \
-  -H "Content-Type: application/json" \
-  -H "X-API-Key: dev-api-key-change-in-production" \
-  -d '{
-    "actor": "alice@company.com"
-  }'
-```
+# Start the system
+docker compose up -d
 
-### Inbound Reply Webhook
-
-This endpoint receives inbound emails from SendGrid Inbound Parse (multipart/form-data).
-
-```bash
-curl -X POST http://localhost:8000/webhooks/inbound-email \
-  -H "X-Webhook-Secret: dev-webhook-secret-change-in-production" \
-  -F "to=outreach@example.com" \
-  -F "from=jane.smith@techcorp.com" \
-  -F "subject=Re: Quick question about your AI work" \
-  -F "text=Yes, I would be happy to chat. I am available next week."
-```
-
-Response:
-```json
-{
-  "status": "processed",
-  "candidate_id": "987e6543-e21b-34d5-b678-123456789abc",
-  "conversation_id": "111e2222-f33b-44c5-d678-555666777888",
-  "classification": "interested"
-}
-```
-
-### SendGrid Event Webhook
-
-This endpoint handles SendGrid event notifications for bounces, spam reports, and unsubscribes.
-
-**Event Name Normalization:** The webhook handles both `spamreport` (no underscore) and `spam_report` (with underscore) identically, as SendGrid may send either variant. All event names are normalized to lowercase for consistent processing.
-
-**Suppression Events:** The following events trigger automatic do-not-contact suppression:
-- `bounce` - Hard bounces
-- `dropped` - Dropped by SendGrid
-- `blocked` - Blocked by spam filter
-- `spamreport` / `spam_report` - User marked as spam
-- `unsubscribe` - User unsubscribed
-
-```bash
-curl -X POST http://localhost:8000/webhooks/sendgrid-events \
-  -H "Content-Type: application/json" \
-  -H "X-Webhook-Secret: dev-webhook-secret-change-in-production" \
-  -d '[
-    {
-      "event": "spamreport",
-      "email": "bounce@example.com",
-      "sg_message_id": "abc123",
-      "reason": "User marked as spam"
-    }
-  ]'
-```
-
-Response:
-```json
-{
-  "processed": 1,
-  "results": [
-    {"email": "bounce@example.com", "event": "spamreport", "status": "processed"}
-  ]
-}
-```
-
-## Anti-Hallucination Guardrails
-
-The system implements strict validation to prevent LLM hallucinations:
-
-### How It Works
-
-1. **Facts-Only Prompting**: The LLM receives only verified facts about the candidate
-2. **Fact Usage Tracking**: The LLM must declare which facts it used
-3. **Pattern Detection**: Validates against risk patterns like:
-   - "I saw your recent post..."
-   - "Congratulations on your funding..."
-   - "Your keynote at [event]..."
-4. **Blocking**: Drafts with risk flags cannot be sent until reviewed
-
-### Example: Blocked Draft
-
-```json
-{
-  "subject": "Loved your NeurIPS talk",
-  "body": "I saw your keynote at NeurIPS...",
-  "facts_used": ["candidate.name", "candidate.title"],
-  "risk_flags": [
-    "body contains 'your keynote at' but no supporting fact found"
-  ]
-}
-```
-
-This draft **cannot be sent** because it mentions a specific event not in the provided facts.
-
-## Testing
-
-### Run Unit Tests
-
-```bash
-docker compose exec backend pytest
-```
-
-### Test Validator
-
-```bash
-docker compose exec backend pytest tests/test_validator.py -v
-```
-
-### Test Unsubscribe Flow
-
-```bash
-docker compose exec backend pytest tests/test_unsubscribe.py -v
-```
-
-## Database Migrations
-
-### Create a New Migration
-
-```bash
-docker compose exec backend alembic revision --autogenerate -m "description"
-```
-
-### Apply Migrations
-
-```bash
-docker compose exec backend alembic upgrade head
-```
-
-### Rollback
-
-```bash
-docker compose exec backend alembic downgrade -1
-```
-
-## Monitoring
-
-### View Logs
-
-```bash
-# All services
-docker compose logs -f
-
-# Backend only
+# View logs
 docker compose logs -f backend
 
-# Worker only
-docker compose logs -f worker
+# Restart after code changes
+docker compose restart backend
+
+# Stop the system
+docker compose down
+
+# Reset database (caution: deletes all data)
+docker compose down -v
+docker compose up -d
 ```
 
-### Check Worker Status
+## Project Structure
 
-```bash
-docker compose exec worker rq info
 ```
-
-## Architecture
-
-### Data Flow
-
-1. **Ingestion**: Candidates bulk imported via API
-2. **Enrichment**: Background job finds/verifies emails (mock in dev)
-3. **Scoring**: Background job scores candidate against project criteria
-4. **Drafting**: Background job calls Claude API to generate personalized message
-5. **Validation**: Anti-hallucination validator checks draft
-6. **Approval**: Human reviews and approves draft
-7. **Sending**: Background job sends via SendGrid with idempotency
-8. **Reply**: Webhook ingests replies, classifies intent, updates status
-
-### Security
-
-- **API Key**: All endpoints require `X-API-Key` header
-- **Webhook Secret**: Webhook endpoint requires `X-Webhook-Secret`
-- **Idempotency**: Send operations use idempotency keys to prevent duplicates
-- **Do-Not-Contact**: Enforced at send time, blocks all communication
-
-### Idempotency
-
-The send operation is idempotent using the key: `draft:{draft_id}`
-
-**Key Format:** The idempotency key is stable per draft and does not include the actor. This ensures:
-- Only one email is sent per draft, regardless of which actor initiates the send
-- Multiple send attempts with different actors are properly deduplicated
-- Retrying a send won't duplicate emails
-- Multiple workers can safely process the same job
-- Network failures can be safely retried
-
-The actor is still recorded in the outbound event metadata for audit purposes.
-
-## Hardening Features
-
-### Rate Limiting
-
-The system implements Redis-based per-domain rate limiting to prevent overwhelming recipient servers:
-
-- **Per-domain hourly cap**: Configurable limit (default: 10 emails/hour per domain)
-- **Random jitter delays**: Random delays (5-30 seconds) before sending to spread load
-- **Redis-backed**: Distributed rate limiting across multiple workers
-
-Configuration:
-```env
-RATE_LIMIT_PER_DOMAIN_PER_HOUR=10
-RATE_LIMIT_JITTER_MIN_SECONDS=5
-RATE_LIMIT_JITTER_MAX_SECONDS=30
+expert-outreach/
+├── backend/
+│   ├── app/
+│   │   ├── routers/       # API endpoints
+│   │   ├── services/      # Business logic (Apollo, LLM, scoring)
+│   │   ├── models.py      # Database models
+│   │   └── crud.py        # Database operations
+│   ├── .env.example       # Environment template
+│   └── requirements.txt
+├── frontend/
+│   └── src/
+│       ├── components/    # React components
+│       ├── pages/         # Page views
+│       └── types/         # TypeScript types
+├── docker-compose.yml
+└── README.md
 ```
-
-### Approval Integrity
-
-SHA256 hash verification prevents post-approval tampering:
-
-- Hash computed at approval time from subject, body, approver, and timestamp
-- Hash verified before sending
-- Modified drafts automatically blocked
-
-### Bounce Handling
-
-SendGrid Event Webhook automatically processes delivery failures:
-
-- **Events handled**: bounce, dropped, spam_report, unsubscribe
-- **Automatic do-not-contact**: Failed deliveries added to suppression list
-- **OutboundEvent tracking**: Status updates for audit trail
-
-### Worker Observability
-
-Monitor worker health and queue status:
-
-```bash
-curl -H "X-API-Key: dev-api-key-change-in-production" \
-  http://localhost:8000/admin/workers
-```
-
-Response:
-```json
-{
-  "workers": [
-    {
-      "name": "worker-1",
-      "state": "busy",
-      "current_job": "abc123",
-      "successful_job_count": 45,
-      "failed_job_count": 2
-    }
-  ],
-  "queue": {
-    "name": "default",
-    "length": 5,
-    "finished_count": 100,
-    "failed_count": 2
-  },
-  "failed_jobs": [...]
-}
-```
-
-### SendGrid Configuration
-
-**Inbound Parse Webhook:**
-1. Go to SendGrid dashboard > Settings > Inbound Parse
-2. Add hostname and URL: `https://yourdomain.com/webhooks/inbound-email`
-3. Add HTTP header: `X-Webhook-Secret: your-secret`
-
-**Event Webhook:**
-1. Go to SendGrid dashboard > Settings > Mail Settings > Event Webhook
-2. Set HTTP Post URL: `https://yourdomain.com/webhooks/sendgrid-events`
-3. Enable events: bounce, dropped, spam_report, unsubscribe
-4. Add HTTP header: `X-Webhook-Secret: your-secret`
-
-### Smoke Testing
-
-Run comprehensive integration tests:
-
-```bash
-cd backend
-./smoke-test.sh
-```
-
-## Production Considerations
-
-### Before Deploying to Production
-
-1. **Change Secrets**:
-   - Generate strong `API_KEY` and `WEBHOOK_SECRET`
-   - Never commit secrets to git
-
-2. **Configure Email Provider**:
-   - Set up SendGrid account
-   - Configure Inbound Parse webhook to point to your domain
-   - Verify sender domain
-
-3. **Configure LLM Provider**:
-   - Get Anthropic API key
-   - Set rate limits and monitoring
-
-4. **Database**:
-   - Use managed PostgreSQL (RDS, Cloud SQL, etc.)
-   - Enable backups
-   - Configure connection pooling
-
-5. **Redis**:
-   - Use managed Redis (ElastiCache, Cloud Memorystore, etc.)
-   - Enable persistence (AOF or RDB)
-
-6. **Worker Scaling**:
-   - Run multiple worker instances for throughput
-   - Monitor queue depth
-
-7. **Monitoring**:
-   - Set up log aggregation (DataDog, Sentry, etc.)
-   - Monitor API latency and error rates
-   - Alert on worker failures
-
-8. **Rate Limiting**:
-   - Implement rate limiting on API endpoints
-   - Respect SendGrid sending limits
-   - Monitor Anthropic API usage
 
 ## License
 
-Proprietary - Internal Use Only
+MIT
