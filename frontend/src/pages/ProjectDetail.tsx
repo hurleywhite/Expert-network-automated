@@ -5,6 +5,13 @@ import type { Project, PipelineStatus, ReviewQueue } from '../types';
 import StatusCard from '../components/StatusCard';
 import DraftCard from '../components/DraftCard';
 
+// Clean up project names for display
+function formatProjectName(name: string): string {
+  let cleaned = name.replace(/^Find\s+/i, '');
+  cleaned = cleaned.charAt(0).toUpperCase() + cleaned.slice(1);
+  return cleaned;
+}
+
 export default function ProjectDetail() {
   const { projectId } = useParams<{ projectId: string }>();
   const [project, setProject] = useState<Project | null>(null);
@@ -138,7 +145,7 @@ export default function ProjectDetail() {
           Dashboard
         </Link>
         <span className="mx-2 text-gray-400">/</span>
-        <span className="text-gray-600">{project?.name}</span>
+        <span className="text-gray-600">{project?.name ? formatProjectName(project.name) : ''}</span>
       </nav>
 
       {/* Messages */}
@@ -162,7 +169,7 @@ export default function ProjectDetail() {
 
       {/* Header */}
       <div className="mb-6">
-        <h1 className="text-2xl font-bold text-gray-900">{project?.name}</h1>
+        <h1 className="text-2xl font-bold text-gray-900">{project?.name ? formatProjectName(project.name) : ''}</h1>
         {project?.industry && (
           <p className="text-gray-600 mt-1">
             {project.industry}

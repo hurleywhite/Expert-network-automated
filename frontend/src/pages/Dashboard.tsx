@@ -7,6 +7,15 @@ interface ProjectWithStatus extends Project {
   status?: PipelineStatus;
 }
 
+// Clean up project names for display
+function formatProjectName(name: string): string {
+  // Remove "Find" prefix
+  let cleaned = name.replace(/^Find\s+/i, '');
+  // Capitalize first letter
+  cleaned = cleaned.charAt(0).toUpperCase() + cleaned.slice(1);
+  return cleaned;
+}
+
 export default function Dashboard() {
   const [projects, setProjects] = useState<ProjectWithStatus[]>([]);
   const [loading, setLoading] = useState(true);
@@ -91,7 +100,7 @@ export default function Dashboard() {
               className="block bg-white rounded-lg shadow border border-gray-200 p-5 hover:shadow-md transition-shadow"
             >
               <h2 className="text-lg font-semibold text-gray-900 truncate">
-                {project.name}
+                {formatProjectName(project.name)}
               </h2>
 
               {project.industry && (
