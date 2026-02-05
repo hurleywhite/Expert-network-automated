@@ -440,9 +440,9 @@ def get_project_candidates(
 
     # Get all scores for this project with candidate info
     scores = (
-        db.query(models.CandidateScore)
-        .filter(models.CandidateScore.project_id == project_id)
-        .order_by(models.CandidateScore.score.desc())
+        db.query(models.Score)
+        .filter(models.Score.project_id == project_id)
+        .order_by(models.Score.score.desc())
         .all()
     )
 
