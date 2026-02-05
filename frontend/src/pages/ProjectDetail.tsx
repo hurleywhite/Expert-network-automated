@@ -1,4 +1,4 @@
-import { useState, useEffect, useCallback } from 'react';
+import { useState, useEffect, useCallback, useRef } from 'react';
 import { useParams, Link } from 'react-router-dom';
 import { projectsApi, draftsApi } from '../api/client';
 import type { Project, PipelineStatus, ReviewQueue, ApprovedDraftsResponse, ProjectCandidatesResponse } from '../types';
@@ -27,6 +27,19 @@ export default function ProjectDetail() {
   const [bulkApproving, setBulkApproving] = useState(false);
   const [sending, setSending] = useState(false);
   const [successMessage, setSuccessMessage] = useState<string | null>(null);
+
+  // Refs for scrolling to sections
+  const candidatesRef = useRef<HTMLDivElement>(null);
+  const pendingReviewRef = useRef<HTMLDivElement>(null);
+  const approvedRef = useRef<HTMLDivElement>(null);
+  const sentRef = useRef<HTMLDivElement>(null);
+
+  const scrollToSection = (ref: React.RefObject<HTMLDivElement | null>, expand?: () => void) => {
+    if (expand) expand();
+    setTimeout(() => {
+      ref.current?.scrollIntoView({ behavior: 'smooth', block: 'start' });
+    }, 100);
+  };
 
   const loadData = useCallback(async () => {
     if (!projectId) return;
@@ -204,16 +217,19 @@ export default function ProjectDetail() {
               label="Candidates Scored"
               value={status.pipeline.candidates_scored}
               color="gray"
+              onClick={() => scrollToSection(candidatesRef, () => setShowCandidates(true))}
             />
             <StatusCard
               label="Qualified"
               value={status.pipeline.qualified_for_outreach}
               color="blue"
+              onClick={() => scrollToSection(candidatesRef, () => setShowCandidates(true))}
             />
             <StatusCard
               label="Drafts Created"
               value={status.pipeline.drafts_created}
               color="blue"
+              onClick={() => scrollToSection(pendingReviewRef)}
             />
             <StatusCard
               label="Pending Review"
@@ -224,16 +240,19 @@ export default function ProjectDetail() {
                   ? `${status.pipeline.drafts_with_risk_flags} with risk flags`
                   : undefined
               }
+              onClick={() => scrollToSection(pendingReviewRef)}
             />
             <StatusCard
               label="Approved"
               value={status.pipeline.drafts_approved}
               color="green"
+              onClick={() => scrollToSection(approvedRef)}
             />
             <StatusCard
               label="Sent"
               value={status.pipeline.emails_sent}
               color="green"
+              onClick={() => scrollToSection(sentRef)}
             />
             <StatusCard
               label="Replies"
@@ -258,7 +277,7 @@ export default function ProjectDetail() {
 
       {/* Candidates List */}
       {candidates && candidates.total > 0 && (
-        <div className="mb-8">
+        <div className="mb-8" ref={candidatesRef}>
           <button
             onClick={() => setShowCandidates(!showCandidates)}
             className="flex items-center justify-between w-full text-left"
@@ -428,7 +447,7 @@ export default function ProjectDetail() {
 
       {/* Review Queue */}
       {reviewQueue && reviewQueue.total_pending > 0 && (
-        <div className="space-y-8">
+        <div className="space-y-8" ref={pendingReviewRef}>
           {/* Needs Review Section */}
           {needsReviewCount > 0 && (
             <div>
@@ -513,7 +532,7 @@ export default function ProjectDetail() {
 
       {/* Approved Drafts Section */}
       {approvedDrafts && approvedDrafts.approved.count > 0 && (
-        <div className="mt-8">
+        <div className="mt-8" ref={approvedRef}>
           <h2 className="text-lg font-semibold text-gray-900 mb-4 flex items-center">
             <span className="inline-flex items-center justify-center w-6 h-6 rounded-full bg-green-100 text-green-600 text-sm font-bold mr-2">
               {approvedDrafts.approved.count}
@@ -544,7 +563,7 @@ export default function ProjectDetail() {
 
       {/* Sent Drafts Section */}
       {approvedDrafts && approvedDrafts.sent.count > 0 && (
-        <div className="mt-8">
+        <div className="mt-8" ref={sentRef}>
           <h2 className="text-lg font-semibold text-gray-900 mb-4 flex items-center">
             <span className="inline-flex items-center justify-center w-6 h-6 rounded-full bg-blue-100 text-blue-600 text-sm font-bold mr-2">
               {approvedDrafts.sent.count}
