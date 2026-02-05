@@ -1,0 +1,539 @@
+"""
+Expert outreach pipeline orchestration.
+
+Coordinates the full flow:
+1. Parse natural language brief
+2. Score all candidates
+3. Draft messages for qualified candidates
+4. Queue for human review
+5. Send approved drafts
+"""
+from typing import Dict, List, Any, Optional
+from uuid import UUID
+
+from sqlalchemy.orm import Session
+
+from app import crud, models
+from app.services.project_parser import ProjectParser
+from app.services.expert_scorer import ExpertScorer
+from app.services.llm import LLMService
+from app.services.validator import DraftValidator
+
+
+class Pipeline:
+    """Orchestrates the expert outreach pipeline."""
+
+    # Minimum score to qualify for outreach
+    MIN_SCORE_FOR_OUTREACH = 40
+
+    # Minimum score for priority outreach
+    PRIORITY_SCORE_THRESHOLD = 70
+
+    @classmethod
+    def create_project_from_description(
+        cls, db: Session, description: str, created_by: str
+    ) -> Dict[str, Any]:
+        """
+        Create a project from natural language description.
+
+        Example:
+            "Find 401(k) benefits administrators at companies with 10,000+ employees"
+        """
+        parser = ProjectParser()
+        parsed = parser.parse(description)
+
+        # Create the project
+        from app.schemas import ProjectBriefCreate
+
+        project_data = ProjectBriefCreate(
+            name=parsed.get("name", description[:50]),
+            industry=parsed.get("industry"),
+            subvertical=parsed.get("subvertical"),
+            company_size_min=parsed.get("company_size_min"),
+            regions=parsed.get("regions", []),
+            titles_include=parsed.get("titles_include", []),
+            titles_exclude=parsed.get("titles_exclude", []),
+            keywords=parsed.get("keywords", []),
+            exclusions=parsed.get("exclusions", []),
+        )
+
+        project = crud.create_project(db, project_data)
+
+        # Log the creation
+        crud.create_audit_log(
+            db,
+            created_by,
+            "create_project_from_nl",
+            "project",
+            str(project.id),
+            {
+                "original_description": description,
+                "interpretation": parsed.get("interpretation"),
+                "parsed_criteria": parsed,
+            },
+        )
+
+        return {
+            "project": project,
+            "interpretation": parsed.get("interpretation"),
+            "parsed_criteria": parsed,
+        }
+
+    @classmethod
+    def score_all_candidates(
+        cls, db: Session, project_id: UUID
+    ) -> Dict[str, Any]:
+        """
+        Score all candidates against a project.
+
+        Returns scoring summary and candidate rankings.
+        """
+        project = crud.get_project(db, project_id)
+        if not project:
+            return {"error": "Project not found"}
+
+        # Build project criteria dict
+        project_dict = {
+            "titles_include": project.titles_include or [],
+            "titles_exclude": project.titles_exclude or [],
+            "keywords": project.keywords or [],
+            "exclusions": project.exclusions or [],
+            "regions": project.regions or [],
+            "company_size_min": project.company_size_min,
+            "seniority_signals": [],  # Could be added to project model
+            "expertise_signals": [],
+        }
+
+        # Get all candidates (or filter by status)
+        candidates = db.query(models.Candidate).filter(
+            models.Candidate.status.in_([
+                models.CandidateStatus.NEW,
+                models.CandidateStatus.ENRICHED,
+            ])
+        ).all()
+
+        results = {
+            "total_candidates": len(candidates),
+            "scored": 0,
+            "qualified": 0,
+            "priority": 0,
+            "excluded": 0,
+            "rankings": [],
+        }
+
+        for candidate in candidates:
+            candidate_dict = {
+                "title": candidate.title,
+                "company": candidate.company,
+                "region": candidate.region,
+                "company_employee_count": candidate.company_employee_count,
+                "linkedin_url": candidate.linkedin_url,
+            }
+
+            hard_pass, score, reasons, details = ExpertScorer.score_candidate(
+                candidate_dict, project_dict
+            )
+
+            # Save score to database
+            crud.create_score(
+                db,
+                candidate_id=candidate.id,
+                project_id=project_id,
+                hard_pass=hard_pass,
+                score=score,
+                reasons=reasons,
+            )
+
+            results["scored"] += 1
+
+            if hard_pass:
+                results["excluded"] += 1
+            elif score >= cls.MIN_SCORE_FOR_OUTREACH:
+                results["qualified"] += 1
+                if score >= cls.PRIORITY_SCORE_THRESHOLD:
+                    results["priority"] += 1
+
+            results["rankings"].append({
+                "candidate_id": str(candidate.id),
+                "full_name": candidate.full_name,
+                "title": candidate.title,
+                "company": candidate.company,
+                "score": score,
+                "hard_pass": hard_pass,
+                "recommendation": details.get("recommendation"),
+                "reasons": reasons[:5],  # Top 5 reasons
+            })
+
+        # Sort by score descending
+        results["rankings"].sort(key=lambda x: x["score"], reverse=True)
+
+        return results
+
+    @classmethod
+    def draft_for_qualified_candidates(
+        cls,
+        db: Session,
+        project_id: UUID,
+        min_score: Optional[float] = None,
+        limit: Optional[int] = None,
+        outreach_context: Optional[Dict[str, Any]] = None,
+    ) -> Dict[str, Any]:
+        """
+        Generate drafts for all qualified candidates.
+
+        Only drafts for candidates who:
+        - Have a score >= min_score (default: MIN_SCORE_FOR_OUTREACH)
+        - Are not hard-passed
+        - Don't already have a draft for this project
+        - Have an email address
+        - Are not on do-not-contact
+
+        Args:
+            outreach_context: Optional dict with research_topic, rate_range, sender_name, sender_title
+        """
+        if min_score is None:
+            min_score = cls.MIN_SCORE_FOR_OUTREACH
+
+        project = crud.get_project(db, project_id)
+        if not project:
+            return {"error": "Project not found"}
+
+        # Get qualified candidates with scores
+        scores = (
+            db.query(models.Score)
+            .filter(
+                models.Score.project_id == project_id,
+                models.Score.hard_pass == False,
+                models.Score.score >= min_score,
+            )
+            .order_by(models.Score.score.desc())
+            .all()
+        )
+
+        if limit:
+            scores = scores[:limit]
+
+        results = {
+            "total_qualified": len(scores),
+            "drafted": 0,
+            "skipped": 0,
+            "errors": 0,
+            "drafts": [],
+        }
+
+        llm_service = LLMService()
+
+        for score_record in scores:
+            candidate = crud.get_candidate(db, score_record.candidate_id)
+
+            # Skip if no email
+            if not candidate.email:
+                results["skipped"] += 1
+                continue
+
+            # Skip if on do-not-contact
+            if crud.is_do_not_contact(db, candidate.email):
+                results["skipped"] += 1
+                continue
+
+            # Skip if already has draft for this project
+            existing_draft = (
+                db.query(models.MessageDraft)
+                .filter(
+                    models.MessageDraft.candidate_id == candidate.id,
+                    models.MessageDraft.project_id == project_id,
+                )
+                .first()
+            )
+            if existing_draft:
+                results["skipped"] += 1
+                continue
+
+            # Build facts for drafting
+            candidate_facts = {
+                "full_name": candidate.full_name,
+                "first_name": candidate.first_name,
+                "title": candidate.title,
+                "company": candidate.company,
+                "region": candidate.region,
+            }
+
+            project_facts = {
+                "name": project.name,
+                "industry": project.industry,
+                "subvertical": project.subvertical,
+            }
+
+            try:
+                # Generate draft
+                draft_result = llm_service.draft_message(candidate_facts, project_facts, outreach_context)
+
+                # Validate
+                provided_facts = {
+                    **{f"candidate.{k}": v for k, v in candidate_facts.items() if v},
+                    **{f"project.{k}": v for k, v in project_facts.items() if v},
+                }
+
+                validation_flags = DraftValidator.validate(
+                    subject=draft_result["subject"],
+                    body=draft_result["body"],
+                    facts_used=draft_result["facts_used"],
+                    provided_facts=provided_facts,
+                )
+
+                all_risk_flags = list(set(draft_result.get("risk_flags", []) + validation_flags))
+
+                # Save draft
+                draft = crud.create_draft(
+                    db,
+                    candidate_id=candidate.id,
+                    project_id=project_id,
+                    subject=draft_result["subject"],
+                    body=draft_result["body"],
+                    facts_used=draft_result["facts_used"],
+                    risk_flags=all_risk_flags,
+                )
+
+                results["drafted"] += 1
+                results["drafts"].append({
+                    "draft_id": str(draft.id),
+                    "candidate_id": str(candidate.id),
+                    "candidate_name": candidate.full_name,
+                    "candidate_title": candidate.title,
+                    "candidate_company": candidate.company,
+                    "score": score_record.score,
+                    "subject": draft.subject,
+                    "risk_flags": all_risk_flags,
+                    "safe_to_send": len(all_risk_flags) == 0,
+                })
+
+            except Exception as e:
+                results["errors"] += 1
+
+        return results
+
+    @classmethod
+    def get_review_queue(
+        cls, db: Session, project_id: UUID
+    ) -> Dict[str, Any]:
+        """
+        Get drafts pending human review.
+
+        Returns drafts grouped by:
+        - Ready to approve (no risk flags)
+        - Needs review (has risk flags)
+        """
+        drafts = (
+            db.query(models.MessageDraft)
+            .filter(
+                models.MessageDraft.project_id == project_id,
+                models.MessageDraft.approved_at == None,
+            )
+            .all()
+        )
+
+        ready_to_approve = []
+        needs_review = []
+
+        for draft in drafts:
+            candidate = crud.get_candidate(db, draft.candidate_id)
+            score = (
+                db.query(models.Score)
+                .filter(
+                    models.Score.candidate_id == draft.candidate_id,
+                    models.Score.project_id == project_id,
+                )
+                .first()
+            )
+
+            draft_info = {
+                "draft_id": str(draft.id),
+                "candidate_id": str(draft.candidate_id),
+                "candidate_name": candidate.full_name if candidate else "Unknown",
+                "candidate_title": candidate.title if candidate else "",
+                "candidate_company": candidate.company if candidate else "",
+                "candidate_email": candidate.email if candidate else "",
+                "score": score.score if score else 0,
+                "subject": draft.subject,
+                "body": draft.body,
+                "facts_used": draft.facts_used,
+                "risk_flags": draft.risk_flags,
+                "created_at": draft.created_at.isoformat(),
+            }
+
+            if draft.risk_flags:
+                needs_review.append(draft_info)
+            else:
+                ready_to_approve.append(draft_info)
+
+        return {
+            "project_id": str(project_id),
+            "total_pending": len(drafts),
+            "ready_to_approve": {
+                "count": len(ready_to_approve),
+                "drafts": ready_to_approve,
+            },
+            "needs_review": {
+                "count": len(needs_review),
+                "drafts": needs_review,
+            },
+        }
+
+    @classmethod
+    def bulk_approve_safe_drafts(
+        cls, db: Session, project_id: UUID, approved_by: str
+    ) -> Dict[str, Any]:
+        """
+        Approve all drafts with no risk flags.
+
+        Human still reviews drafts with risk flags individually.
+        """
+        from sqlalchemy import cast, String
+
+        drafts = (
+            db.query(models.MessageDraft)
+            .filter(
+                models.MessageDraft.project_id == project_id,
+                models.MessageDraft.approved_at == None,
+                cast(models.MessageDraft.risk_flags, String) == '[]',
+            )
+            .all()
+        )
+
+        approved_count = 0
+        for draft in drafts:
+            crud.approve_draft(db, draft.id, approved_by)
+            approved_count += 1
+
+        crud.create_audit_log(
+            db,
+            approved_by,
+            "bulk_approve",
+            "project",
+            str(project_id),
+            {"approved_count": approved_count},
+        )
+
+        return {
+            "project_id": str(project_id),
+            "approved_count": approved_count,
+            "approved_by": approved_by,
+        }
+
+    @classmethod
+    def get_pipeline_status(cls, db: Session, project_id: UUID) -> Dict[str, Any]:
+        """Get overall pipeline status for a project."""
+        project = crud.get_project(db, project_id)
+        if not project:
+            return {"error": "Project not found"}
+
+        # Count candidates by status
+        candidates_scored = (
+            db.query(models.Score)
+            .filter(models.Score.project_id == project_id)
+            .count()
+        )
+
+        qualified = (
+            db.query(models.Score)
+            .filter(
+                models.Score.project_id == project_id,
+                models.Score.hard_pass == False,
+                models.Score.score >= cls.MIN_SCORE_FOR_OUTREACH,
+            )
+            .count()
+        )
+
+        drafts_total = (
+            db.query(models.MessageDraft)
+            .filter(models.MessageDraft.project_id == project_id)
+            .count()
+        )
+
+        drafts_approved = (
+            db.query(models.MessageDraft)
+            .filter(
+                models.MessageDraft.project_id == project_id,
+                models.MessageDraft.approved_at != None,
+            )
+            .count()
+        )
+
+        from sqlalchemy import cast, String
+        from sqlalchemy.dialects.postgresql import JSONB
+
+        drafts_with_risk = (
+            db.query(models.MessageDraft)
+            .filter(
+                models.MessageDraft.project_id == project_id,
+                models.MessageDraft.approved_at == None,
+                cast(models.MessageDraft.risk_flags, String) != '[]',
+            )
+            .count()
+        )
+
+        sent = (
+            db.query(models.OutboundEvent)
+            .filter(
+                models.OutboundEvent.project_id == project_id,
+                models.OutboundEvent.status == models.OutboundEventStatus.SENT,
+            )
+            .count()
+        )
+
+        replies = (
+            db.query(models.Conversation)
+            .filter(
+                models.Conversation.project_id == project_id,
+                models.Conversation.last_status != models.ConversationStatus.NONE,
+            )
+            .count()
+        )
+
+        interested = (
+            db.query(models.Conversation)
+            .filter(
+                models.Conversation.project_id == project_id,
+                models.Conversation.last_status == models.ConversationStatus.INTERESTED,
+            )
+            .count()
+        )
+
+        return {
+            "project_id": str(project_id),
+            "project_name": project.name,
+            "pipeline": {
+                "candidates_scored": candidates_scored,
+                "qualified_for_outreach": qualified,
+                "drafts_created": drafts_total,
+                "drafts_pending_review": drafts_total - drafts_approved,
+                "drafts_with_risk_flags": drafts_with_risk,
+                "drafts_approved": drafts_approved,
+                "emails_sent": sent,
+                "replies_received": replies,
+                "interested": interested,
+            },
+            "next_action": cls._get_next_action(
+                candidates_scored, qualified, drafts_total, drafts_approved, sent
+            ),
+        }
+
+    @classmethod
+    def _get_next_action(
+        cls,
+        scored: int,
+        qualified: int,
+        drafted: int,
+        approved: int,
+        sent: int,
+    ) -> str:
+        """Suggest the next action in the pipeline."""
+        if scored == 0:
+            return "Score candidates: POST /projects/{id}/score-all"
+        if drafted == 0 and qualified > 0:
+            return "Generate drafts: POST /projects/{id}/draft-qualified"
+        if approved < drafted:
+            return "Review and approve drafts: GET /projects/{id}/review-queue"
+        if sent < approved:
+            return "Send approved drafts: POST /projects/{id}/send-approved"
+        return "Monitor replies and follow up with interested experts"
