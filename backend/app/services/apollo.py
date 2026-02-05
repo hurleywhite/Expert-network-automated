@@ -329,6 +329,11 @@ class ApolloService:
             # Use q_keywords for general keyword search
             search_params["q_keywords"] = " ".join(criteria["keywords"])
 
+        if criteria.get("organization_keywords"):
+            # Use q_organization_keyword_tags to filter by company/industry keywords
+            # This is more targeted than q_keywords and filters by company type
+            search_params["q_organization_keyword_tags"] = criteria["organization_keywords"]
+
         # Additional filters
         if criteria.get("company_names"):
             search_params["organization_names"] = criteria["company_names"]

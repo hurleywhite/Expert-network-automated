@@ -58,6 +58,10 @@ class SourcingSearchCriteria(BaseModel):
         default_factory=list,
         description="Additional keywords for broader matching"
     )
+    organization_keywords: List[str] = Field(
+        default_factory=list,
+        description="Keywords to filter by company/industry type (e.g., 'fintech', 'healthcare', 'SaaS')"
+    )
     company_names: List[str] = Field(
         default_factory=list,
         description="Specific company names to target"
@@ -492,6 +496,10 @@ class FromBriefRequest(BaseModel):
         default=None,
         description="Override seniority levels (e.g., ['senior', 'manager', 'director'])"
     )
+    organization_keywords: Optional[List[str]] = Field(
+        default=None,
+        description="Override company/industry keywords (e.g., ['fintech', 'payments', 'blockchain'])"
+    )
     max_results: int = Field(default=50, ge=1, le=500)
     require_email: bool = Field(default=True)
 
@@ -539,9 +547,24 @@ def import_candidates_from_project_brief(
         titles = sorted(titles, key=lambda t: len(t))[:5]
         logger.info(f"Limited titles from {len(project.titles_include)} to 5 for Apollo API")
 
-    # Keywords: Skip for Apollo search - they make results too restrictive
-    # Titles alone are usually sufficient for finding relevant candidates
+    # Keywords: Skip general keywords - they make results too restrictive
     keywords = []
+
+    # Organization keywords: Use industry and top project keywords to filter by company type
+    # This is critical for finding relevant companies (e.g., fintech vs law firms)
+    if request.organization_keywords:
+        # Use override if provided
+        org_keywords = request.organization_keywords[:5]
+    else:
+        # Build from project industry and keywords
+        org_keywords = []
+        if project.industry:
+            org_keywords.append(project.industry.lower())
+        # Add top 2-3 industry-related keywords from project
+        project_keywords = project.keywords or []
+        # Prioritize industry-describing keywords (shorter ones tend to be more specific)
+        industry_keywords = [k for k in project_keywords if len(k.split()) <= 2][:3]
+        org_keywords.extend(industry_keywords)
 
     # Locations: use override if provided, otherwise use first project region only
     # Apollo works better with specific, single locations
@@ -552,21 +575,22 @@ def import_candidates_from_project_brief(
         regions = project.regions or []
         locations = [regions[0]] if regions else []
 
-    # Industries: skip - Apollo sometimes has issues with industry + other filters
+    # Industries: skip - Apollo's industry_tag_ids require specific IDs
     industries = []
 
     # Exclusions: skip - can cause "parameters incorrect" errors
     exclusions = []
 
     logger.info(
-        f"Building criteria: titles={titles}, locations={locations}, "
-        f"seniorities={request.seniorities or []}"
+        f"Building criteria: titles={titles}, org_keywords={org_keywords}, "
+        f"locations={locations}, seniorities={request.seniorities or []}"
     )
 
     criteria = SourcingSearchCriteria(
         titles=titles,
         industries=industries,
         keywords=keywords,
+        organization_keywords=org_keywords,
         locations=locations,
         exclude_companies=exclusions,
         seniorities=request.seniorities or [],
