@@ -112,7 +112,7 @@ We'd keep it tight — mainly:
 • Common pitfalls / failure modes you've seen in [PROCESS]
 • What's changing in [MARKET/REGULATION/TECH] over the next 12–18 months
 
-No prep required. And we can offer $[RATE] for 30 min (varies by experience), if helpful.
+No prep required. And we can offer $[RATE] for 30 min (varies by experience), for your time.
 
 If you're open, what does your availability look like — or should I send a scheduling link?
 
@@ -169,7 +169,7 @@ We'd keep it tight — mainly:
 • Common pitfalls / failure modes you've seen
 • What's changing in the market over the next 12–18 months
 
-No prep required. And we can offer ${rate_range} for 30 min (varies by experience), if helpful.
+No prep required. And we can offer ${rate_range} for 30 min (varies by experience), for your time.
 
 If you're open, what does your availability look like — or should I send a scheduling link?
 
