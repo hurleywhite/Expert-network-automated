@@ -115,7 +115,7 @@ CANDIDATE FACTS (use ONLY these - do not hallucinate):
 
 OUTREACH CONTEXT:
 - Research topic: {research_topic}
-- Rate: ${rate_range} for 30 min
+- Rate: ${rate_range} for 30 min (you may adjust slightly based on seniority level)
 - Sender: {sender_name} {sender_title}
 
 YOUR TASK:
@@ -137,7 +137,7 @@ We'd keep it tight — mainly:
 • Common pitfalls / failure modes you've seen in [PROCESS]
 • What's changing in [MARKET/REGULATION/TECH] in the near future
 
-No prep required. And we can offer $[RATE] for 30 min (varies by experience), for your time.
+No prep required. And we can offer $[RATE] for 30 min for your time.
 
 If you're open, what does your availability look like — or should I send a scheduling link?
 
