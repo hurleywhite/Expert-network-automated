@@ -49,6 +49,7 @@ class ExpertScorer:
         full_name = candidate.get("full_name") or ""
 
         # Extract project criteria
+        titles_include = [t.lower() for t in project.get("titles_include", [])]
         titles_exclude = [t.lower() for t in project.get("titles_exclude", [])]
         exclusions = [e.lower() for e in project.get("exclusions", [])]
         keywords = [k.lower() for k in project.get("keywords", [])]
@@ -88,9 +89,9 @@ class ExpertScorer:
         scores["reachability"] = reachability_score
         reasons.extend(reachability_reasons)
 
-        # 3. RELEVANCE CONFIDENCE (0-30 points)
+        # 3. RELEVANCE CONFIDENCE (0-45 points) - includes title match
         relevance_score, relevance_reasons = cls._score_relevance_confidence(
-            title, company, keywords
+            title, company, keywords, titles_include
         )
         scores["relevance"] = relevance_score
         reasons.extend(relevance_reasons)
@@ -209,54 +210,81 @@ class ExpertScorer:
 
     @classmethod
     def _score_relevance_confidence(
-        cls, title: str, company: str, keywords: List[str]
+        cls, title: str, company: str, keywords: List[str], titles_include: List[str]
     ) -> Tuple[float, List[str]]:
         """
         Score how confident we are the person is relevant.
 
-        More lenient than strict matching - we give points for:
-        - Any keyword overlap (they're in the space)
-        - Having a substantive title (not just "Employee")
-        - Company name suggesting relevance
+        Scores based on:
+        - Title match against target titles (most important!)
+        - Keyword overlap in title/company
+        - Having a substantive role
         """
         reasons = []
         score = 0.0
-        combined = f"{title} {company}".lower()
-
-        # Keyword matches (up to 20 points)
-        if keywords:
-            keyword_matches = [k for k in keywords if k in combined]
-            if keyword_matches:
-                # More matches = more confidence
-                match_score = min(20, len(keyword_matches) * 7)
-                score += match_score
-                reasons.append(f"keywords: {len(keyword_matches)} matches ({match_score}pts)")
-            else:
-                # No keyword match, but don't penalize too hard
-                # They might still be relevant
-                score += 5
-                reasons.append("keywords: no direct match, but may be relevant (5pts)")
-        else:
-            # No keywords defined, give benefit of doubt
-            score += 15
-            reasons.append("keywords: none specified (15pts)")
-
-        # Title substance check (up to 10 points)
         title_lower = title.lower()
+        company_lower = company.lower()
+        combined = f"{title_lower} {company_lower}"
+
+        # TITLE MATCH (up to 25 points) - most important for relevance!
+        if titles_include:
+            title_matched = False
+            for target_title in titles_include:
+                # Check if target title appears in candidate's title
+                if target_title in title_lower:
+                    score += 25
+                    reasons.append(f"title_match: '{target_title}' matches (25pts)")
+                    title_matched = True
+                    break
+                # Also check if main words overlap (e.g., "CCO" matches "Chief Commercial Officer")
+                target_words = set(target_title.split())
+                title_words = set(title_lower.split())
+                overlap = target_words & title_words
+                if len(overlap) >= 2 or (len(overlap) >= 1 and len(target_words) == 1):
+                    score += 20
+                    reasons.append(f"title_match: partial match '{' '.join(overlap)}' (20pts)")
+                    title_matched = True
+                    break
+
+            if not title_matched:
+                reasons.append("title_match: no match to target titles (0pts)")
+
+        # Keyword matches (up to 15 points) - check individual words too
+        if keywords:
+            keyword_matches = []
+            for k in keywords:
+                # Check full phrase
+                if k in combined:
+                    keyword_matches.append(k)
+                else:
+                    # Check individual words in keyword phrase
+                    keyword_words = k.split()
+                    for kw in keyword_words:
+                        if len(kw) > 3 and kw in combined:
+                            keyword_matches.append(kw)
+                            break
+
+            if keyword_matches:
+                unique_matches = list(set(keyword_matches))
+                match_score = min(15, len(unique_matches) * 5)
+                score += match_score
+                reasons.append(f"keywords: {len(unique_matches)} matches ({match_score}pts)")
+            else:
+                reasons.append("keywords: no match (0pts)")
+        else:
+            score += 10
+            reasons.append("keywords: none specified (10pts)")
+
+        # Title substance check (up to 5 points)
         if title:
-            # Check for substantive roles
             substantive_indicators = [
                 "director", "manager", "head", "lead", "chief", "vp",
-                "president", "founder", "owner", "editor", "publisher",
-                "specialist", "analyst", "consultant", "advisor", "expert",
-                "senior", "principal", "executive"
+                "president", "founder", "owner", "cco", "cro", "cmo",
+                "specialist", "senior", "principal", "executive", "officer"
             ]
             if any(ind in title_lower for ind in substantive_indicators):
-                score += 10
-                reasons.append("title: substantive role (10pts)")
-            elif len(title) > 5:
                 score += 5
-                reasons.append("title: has role description (5pts)")
+                reasons.append("title_substance: senior role (5pts)")
 
         return (score, reasons)
 

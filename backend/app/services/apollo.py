@@ -303,6 +303,8 @@ class ApolloService:
         search_params: Dict[str, Any] = {
             "page": page,
             "per_page": min(per_page, 100),  # Apollo max is 100
+            "reveal_personal_emails": True,  # Request email reveals (costs credits)
+            "reveal_phone_number": False,
         }
 
         # Map our criteria to Apollo's person search parameters

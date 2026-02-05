@@ -179,13 +179,25 @@ class Pipeline:
             "expertise_signals": [],
         }
 
-        # Get all candidates (or filter by status)
-        candidates = db.query(models.Candidate).filter(
-            models.Candidate.status.in_([
-                models.CandidateStatus.NEW,
-                models.CandidateStatus.ENRICHED,
-            ])
-        ).all()
+        # Get candidates sourced for this specific project
+        # Join with CandidateSource and filter by project_id in source_payload
+        from sqlalchemy import cast, String
+        from sqlalchemy.dialects.postgresql import JSONB
+
+        candidates_for_project = (
+            db.query(models.Candidate)
+            .join(models.CandidateSource)
+            .filter(
+                models.CandidateSource.source_payload['project_id'].astext == str(project_id),
+                models.Candidate.status.in_([
+                    models.CandidateStatus.NEW,
+                    models.CandidateStatus.ENRICHED,
+                ])
+            )
+            .all()
+        )
+
+        candidates = candidates_for_project
 
         results = {
             "total_candidates": len(candidates),

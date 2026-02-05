@@ -430,38 +430,58 @@ def get_project_candidates(
     db: Session = Depends(get_db),
 ):
     """
-    Get all scored candidates for a project.
+    Get candidates sourced for this specific project.
 
     Returns candidates with their scores, sorted by score descending.
+    Only shows candidates that were imported for this project.
     """
     project = crud.get_project(db, project_id)
     if not project:
         raise HTTPException(status_code=404, detail="Project not found")
 
-    # Get all scores for this project with candidate info
-    scores = (
-        db.query(models.Score)
-        .filter(models.Score.project_id == project_id)
-        .order_by(models.Score.score.desc())
+    # Get candidates that were sourced for this specific project
+    # by checking source_payload.project_id
+    project_candidates = (
+        db.query(models.Candidate)
+        .join(models.CandidateSource)
+        .filter(
+            models.CandidateSource.source_payload['project_id'].astext == str(project_id)
+        )
         .all()
     )
 
+    # Get scores for these candidates
+    candidate_ids = [c.id for c in project_candidates]
+    scores_map = {}
+    if candidate_ids:
+        scores = (
+            db.query(models.Score)
+            .filter(
+                models.Score.project_id == project_id,
+                models.Score.candidate_id.in_(candidate_ids)
+            )
+            .all()
+        )
+        scores_map = {s.candidate_id: s for s in scores}
+
     candidates = []
-    for score in scores:
-        candidate = crud.get_candidate(db, score.candidate_id)
-        if candidate:
-            candidates.append({
-                "candidate_id": str(candidate.id),
-                "full_name": candidate.full_name,
-                "title": candidate.title,
-                "company": candidate.company,
-                "email": candidate.email,
-                "linkedin_url": candidate.linkedin_url,
-                "region": candidate.region,
-                "score": score.score,
-                "hard_pass": score.hard_pass,
-                "reasons": score.reasons or [],
-            })
+    for candidate in project_candidates:
+        score_record = scores_map.get(candidate.id)
+        candidates.append({
+            "candidate_id": str(candidate.id),
+            "full_name": candidate.full_name,
+            "title": candidate.title,
+            "company": candidate.company,
+            "email": candidate.email,
+            "linkedin_url": candidate.linkedin_url,
+            "region": candidate.region,
+            "score": score_record.score if score_record else None,
+            "hard_pass": score_record.hard_pass if score_record else False,
+            "reasons": score_record.reasons if score_record else [],
+        })
+
+    # Sort by score descending (None scores at end)
+    candidates.sort(key=lambda x: (x["score"] is not None, x["score"] or 0), reverse=True)
 
     return {
         "project_id": str(project_id),
