@@ -184,6 +184,8 @@ class Pipeline:
         from sqlalchemy import cast, String
         from sqlalchemy.dialects.postgresql import JSONB
 
+        # Include NEW, ENRICHED, and DRAFTED candidates for (re)scoring
+        # This allows re-scoring after criteria changes (e.g., geographic filtering)
         candidates_for_project = (
             db.query(models.Candidate)
             .join(models.CandidateSource)
@@ -192,6 +194,7 @@ class Pipeline:
                 models.Candidate.status.in_([
                     models.CandidateStatus.NEW,
                     models.CandidateStatus.ENRICHED,
+                    models.CandidateStatus.DRAFTED,
                 ])
             )
             .all()

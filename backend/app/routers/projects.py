@@ -450,19 +450,24 @@ def get_project_candidates(
         .all()
     )
 
-    # Get scores for these candidates
+    # Get latest scores for these candidates (ordered by id desc to get most recent)
     candidate_ids = [c.id for c in project_candidates]
     scores_map = {}
     if candidate_ids:
+        # Get all scores and keep only the latest one per candidate
         scores = (
             db.query(models.Score)
             .filter(
                 models.Score.project_id == project_id,
                 models.Score.candidate_id.in_(candidate_ids)
             )
+            .order_by(models.Score.id.desc())
             .all()
         )
-        scores_map = {s.candidate_id: s for s in scores}
+        # First score per candidate_id is the latest (due to desc ordering)
+        for s in scores:
+            if s.candidate_id not in scores_map:
+                scores_map[s.candidate_id] = s
 
     candidates = []
     for candidate in project_candidates:
@@ -471,6 +476,11 @@ def get_project_candidates(
             continue
 
         score_record = scores_map.get(candidate.id)
+
+        # Skip candidates that are hard_passed (e.g., outside target region)
+        if score_record and score_record.hard_pass:
+            continue
+
         # Cap score at 100 for display
         score_value = score_record.score if score_record else None
         if score_value is not None:

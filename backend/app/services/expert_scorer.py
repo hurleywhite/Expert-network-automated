@@ -65,20 +65,33 @@ class ExpertScorer:
         titles_exclude = [t.lower() for t in project.get("titles_exclude", [])]
         exclusions = [e.lower() for e in project.get("exclusions", [])]
 
-        # ============ HARD PASS CHECKS (explicit exclusions only) ============
+        # ============ HARD PASS CHECKS ============
         hard_pass = False
         title_lower = title.lower()
         company_lower = company.lower()
 
+        # Check title exclusions
         for excluded in titles_exclude:
             if excluded and excluded in title_lower:
                 hard_pass = True
                 reasons.append(f"EXCLUDE: title contains '{excluded}'")
 
+        # Check company exclusions
         for exclusion in exclusions:
             if exclusion and exclusion in company_lower:
                 hard_pass = True
                 reasons.append(f"EXCLUDE: company matches '{exclusion}'")
+
+        # Check geographic requirements - if project specifies regions, candidate must match
+        target_regions = project.get("regions", [])
+        if target_regions and region:
+            if not cls._matches_target_region(region, target_regions):
+                hard_pass = True
+                reasons.append(f"EXCLUDE: location '{region}' outside target regions {target_regions}")
+        elif target_regions and not region:
+            # Project requires specific region but candidate has no location data
+            hard_pass = True
+            reasons.append(f"EXCLUDE: no location data, project requires {target_regions}")
 
         if hard_pass:
             return (True, 0.0, reasons, {"hard_pass_reason": reasons})
@@ -220,6 +233,76 @@ class ExpertScorer:
         ]
         domain = email.lower().split("@")[-1]
         return domain not in personal_domains
+
+    @classmethod
+    def _matches_target_region(cls, candidate_region: str, target_regions: List[str]) -> bool:
+        """
+        Check if candidate's region matches any of the target regions.
+
+        Uses strict word-boundary matching to avoid false positives like
+        "Manhattan" matching "Malaysia" via the "ma" abbreviation.
+        """
+        if not candidate_region or not target_regions:
+            return False
+
+        candidate_lower = candidate_region.lower()
+        # Extract words from candidate region for word-boundary matching
+        candidate_words = set(candidate_lower.replace(",", " ").replace(".", " ").split())
+
+        # Define specific keywords that uniquely identify each region
+        # Avoid common words like "new" that appear in multiple places
+        nyc_specific = {"york", "nyc", "manhattan", "brooklyn", "queens", "bronx"}
+        sf_specific = {"francisco", "sf"}
+        la_specific = {"angeles"}
+        chicago_specific = {"chicago"}
+        boston_specific = {"boston"}
+        seattle_specific = {"seattle"}
+        dc_specific = {"columbia", "district"}
+
+        for target in target_regions:
+            target_lower = target.lower().strip()
+            target_words = set(target_lower.replace(",", " ").replace(".", " ").split())
+
+            # Direct word match - if ALL target words appear as whole words in candidate
+            if target_words and target_words.issubset(candidate_words):
+                return True
+
+            # Check if target phrase appears in candidate (for multi-word names)
+            if len(target_lower) > 4 and target_lower in candidate_lower:
+                return True
+
+            # For NYC targets, check if candidate has NYC-specific keywords
+            # "york" is specific enough to not match "New Delhi"
+            if target_words & nyc_specific or ("new" in target_words and "york" in target_words):
+                if candidate_words & nyc_specific or ("new" in candidate_words and "york" in candidate_words):
+                    return True
+
+            # Similarly for other regions - use specific keywords
+            if target_words & sf_specific:
+                if candidate_words & sf_specific or "california" in candidate_words:
+                    return True
+
+            if target_words & la_specific:
+                if candidate_words & la_specific or ("los" in candidate_words and "angeles" in candidate_words):
+                    return True
+
+            if target_words & chicago_specific:
+                if candidate_words & chicago_specific or "illinois" in candidate_words:
+                    return True
+
+            if target_words & boston_specific:
+                if candidate_words & boston_specific or "massachusetts" in candidate_words:
+                    return True
+
+            if target_words & seattle_specific:
+                if candidate_words & seattle_specific or "washington" in candidate_words:
+                    return True
+
+            if target_words & dc_specific or ("washington" in target_words and "dc" in target_words):
+                if candidate_words & dc_specific or ("washington" in candidate_words and "dc" in candidate_words):
+                    return True
+
+        return False
 
     @classmethod
     def _get_recommendation(cls, score: float, llm_rec: str) -> str:

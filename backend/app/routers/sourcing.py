@@ -482,11 +482,24 @@ def find_email(
         )
 
 
+class FromBriefRequest(BaseModel):
+    """Optional overrides for from-brief import."""
+    locations: Optional[List[str]] = Field(
+        default=None,
+        description="Override project regions with specific locations (e.g., ['New York, NY', 'Boston, MA'])"
+    )
+    seniorities: Optional[List[str]] = Field(
+        default=None,
+        description="Override seniority levels (e.g., ['senior', 'manager', 'director'])"
+    )
+    max_results: int = Field(default=50, ge=1, le=500)
+    require_email: bool = Field(default=True)
+
+
 @router.post("/import/{project_id}/from-brief", response_model=SourcingImportResponse)
 def import_candidates_from_project_brief(
     project_id: UUID,
-    max_results: int = 50,
-    require_email: bool = True,
+    request: Optional[FromBriefRequest] = None,
     db: Session = Depends(get_db),
 ) -> SourcingImportResponse:
     """
@@ -494,24 +507,69 @@ def import_candidates_from_project_brief(
 
     This endpoint:
     1. Reads the project brief's search criteria (titles, industry, company size, etc.)
-    2. Converts them to Apollo search parameters
+    2. Converts them to Apollo search parameters (intelligently limited to avoid API errors)
     3. Searches and imports matching candidates
 
-    This is a convenience endpoint that automatically builds search criteria
-    from the project definition.
+    Optional overrides:
+    - locations: Override the project's regions (useful for targeting specific cities)
+    - seniorities: Override seniority levels
+    - max_results: Maximum candidates to import (default 50)
+    - require_email: Only import candidates with emails (default true)
+
+    Example:
+        POST /sourcing/import/{project_id}/from-brief
+        {"locations": ["New York, NY"], "seniorities": ["senior", "manager"]}
     """
+    # Handle default request
+    if request is None:
+        request = FromBriefRequest()
+
     # Verify project exists
     project = crud.get_project(db, project_id)
     if not project:
         raise HTTPException(status_code=404, detail="Project not found")
 
-    # Build search criteria from project brief
+    # Build search criteria from project brief with intelligent limits
+    # Apollo API has limits on query complexity, so we prioritize the most important criteria
+
+    # Titles: limit to top 5 (most specific/relevant ones)
+    titles = project.titles_include or []
+    if len(titles) > 5:
+        # Prioritize shorter, more specific titles
+        titles = sorted(titles, key=lambda t: len(t))[:5]
+        logger.info(f"Limited titles from {len(project.titles_include)} to 5 for Apollo API")
+
+    # Keywords: Skip for Apollo search - they make results too restrictive
+    # Titles alone are usually sufficient for finding relevant candidates
+    keywords = []
+
+    # Locations: use override if provided, otherwise use first project region only
+    # Apollo works better with specific, single locations
+    if request.locations:
+        locations = request.locations[:1]  # Use first override location
+    else:
+        # Use first region, prefer specific city format
+        regions = project.regions or []
+        locations = [regions[0]] if regions else []
+
+    # Industries: skip - Apollo sometimes has issues with industry + other filters
+    industries = []
+
+    # Exclusions: skip - can cause "parameters incorrect" errors
+    exclusions = []
+
+    logger.info(
+        f"Building criteria: titles={titles}, locations={locations}, "
+        f"seniorities={request.seniorities or []}"
+    )
+
     criteria = SourcingSearchCriteria(
-        titles=project.titles_include or [],
-        industries=[project.industry] if project.industry else [],
-        keywords=project.keywords or [],
-        locations=project.regions or [],
-        exclude_companies=project.exclusions or [],
+        titles=titles,
+        industries=industries,
+        keywords=keywords,
+        locations=locations,
+        exclude_companies=exclusions,
+        seniorities=request.seniorities or [],
     )
 
     # Map company_size_min to Apollo's size ranges
@@ -528,11 +586,16 @@ def import_candidates_from_project_brief(
         elif size_min >= 200:
             criteria.company_sizes = ["201-500", "501-1000", "1001-5000", "5001-10000", "10001+"]
 
+    logger.info(
+        f"Searching with optimized criteria: {len(titles)} titles, {len(keywords)} keywords, "
+        f"{len(locations)} locations, {len(exclusions)} exclusions"
+    )
+
     # Build import request
     import_request = SourcingImportRequest(
         criteria=criteria,
-        max_results=max_results,
-        require_email=require_email,
+        max_results=request.max_results,
+        require_email=request.require_email,
     )
 
     # Delegate to main import endpoint logic
