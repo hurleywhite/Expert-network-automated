@@ -860,11 +860,15 @@ Best,
                     sender_name=sender_name,
                 )
 
+                # Build subject based on candidate's experience/industry
+                # Use project industry or infer from candidate title
+                subject_topic = project.industry or candidate.title.split()[-1] if candidate.title else "industry trends"
+
                 # Create follow-up draft
                 followup = models.MessageDraft(
                     candidate_id=candidate.id,
                     project_id=project_id,
-                    subject=f"Re: {original_draft.subject}",
+                    subject=f"Quick Research Interview on {subject_topic}",
                     body=body,
                     facts_used=["follow_up_template", "original_draft"],
                     risk_flags=[],
