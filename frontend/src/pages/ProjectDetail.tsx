@@ -502,6 +502,7 @@ export default function ProjectDetail() {
                     draft={draft}
                     onApprove={handleApproveDraft}
                     onReject={handleRejectDraft}
+                    onUpdate={loadData}
                     isApproving={approvingDraft === draft.draft_id}
                     isRejecting={rejectingDraft === draft.draft_id}
                   />
@@ -529,6 +530,7 @@ export default function ProjectDetail() {
                     draft={draft}
                     onApprove={handleApproveDraft}
                     onReject={handleRejectDraft}
+                    onUpdate={loadData}
                     isApproving={approvingDraft === draft.draft_id}
                     isRejecting={rejectingDraft === draft.draft_id}
                   />
