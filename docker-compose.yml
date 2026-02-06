@@ -1,5 +1,8 @@
 version: '3.8'
 
+# Load environment variables from backend/.env
+# Docker Compose will use these for ${VAR} substitutions
+
 services:
   postgres:
     image: postgres:15-alpine
@@ -31,14 +34,16 @@ services:
     build: ./backend
     ports:
       - "8000:8000"
+    env_file:
+      - ./backend/.env
     environment:
       - DATABASE_URL=postgresql://postgres:postgres@postgres:5432/expert_outreach
       - REDIS_URL=redis://redis:6379/0
       - API_KEY=${API_KEY:-dev-api-key-change-in-production}
       - WEBHOOK_SECRET=${WEBHOOK_SECRET:-dev-webhook-secret-change-in-production}
-      - RESEND_API_KEY=${RESEND_API_KEY:-}
-      - RESEND_FROM_EMAIL=${RESEND_FROM_EMAIL:-outreach@example.com}
-      - RESEND_FROM_NAME=${RESEND_FROM_NAME:-Expert Outreach}
+      - RESEND_API_KEY
+      - RESEND_FROM_EMAIL
+      - RESEND_FROM_NAME
       - SENDGRID_API_KEY=${SENDGRID_API_KEY:-}
       - SENDGRID_FROM_EMAIL=${SENDGRID_FROM_EMAIL:-outreach@example.com}
       - SENDGRID_FROM_NAME=${SENDGRID_FROM_NAME:-Expert Outreach}
@@ -56,12 +61,14 @@ services:
   worker:
     build: ./backend
     command: python worker.py
+    env_file:
+      - ./backend/.env
     environment:
       - DATABASE_URL=postgresql://postgres:postgres@postgres:5432/expert_outreach
       - REDIS_URL=redis://redis:6379/0
-      - RESEND_API_KEY=${RESEND_API_KEY:-}
-      - RESEND_FROM_EMAIL=${RESEND_FROM_EMAIL:-outreach@example.com}
-      - RESEND_FROM_NAME=${RESEND_FROM_NAME:-Expert Outreach}
+      - RESEND_API_KEY
+      - RESEND_FROM_EMAIL
+      - RESEND_FROM_NAME
       - SENDGRID_API_KEY=${SENDGRID_API_KEY:-}
       - SENDGRID_FROM_EMAIL=${SENDGRID_FROM_EMAIL:-outreach@example.com}
       - SENDGRID_FROM_NAME=${SENDGRID_FROM_NAME:-Expert Outreach}
