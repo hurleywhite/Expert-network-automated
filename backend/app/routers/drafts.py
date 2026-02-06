@@ -88,7 +88,7 @@ def update_draft(
     Update a draft's subject or body.
 
     Use this to make minor tweaks before sending.
-    Note: Editing a draft will clear its approval status.
+    Editing keeps the draft approved - saving implies approval of changes.
     """
     draft = crud.get_draft(db, draft_id)
     if not draft:
@@ -99,12 +99,6 @@ def update_draft(
         draft.subject = update.subject
     if update.body is not None:
         draft.body = update.body
-
-    # Clear approval if content changed (requires re-approval)
-    if update.subject is not None or update.body is not None:
-        draft.approved_at = None
-        draft.approved_by = None
-        draft.approval_hash = None
 
     db.commit()
     db.refresh(draft)

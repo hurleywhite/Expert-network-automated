@@ -163,7 +163,7 @@ export default function ProjectDetail() {
     setSaving(true);
     try {
       await draftsApi.update(draftId, { subject: editSubject, body: editBody });
-      setSuccessMessage('Draft updated - needs re-approval');
+      setSuccessMessage('Draft saved');
       setEditingDraft(null);
       await loadData();
     } catch (err) {
@@ -656,9 +656,6 @@ export default function ProjectDetail() {
                             Cancel
                           </button>
                         </div>
-                        <p className="mt-2 text-xs text-orange-600">
-                          Note: Saving changes will require re-approval before sending.
-                        </p>
                       </div>
                     ) : (
                       <div>
