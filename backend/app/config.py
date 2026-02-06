@@ -29,6 +29,10 @@ class Settings(BaseSettings):
     # LLM (Claude)
     anthropic_api_key: str = ""
     anthropic_model: str = "claude-3-5-sonnet-20241022"
+    
+    # AI Voice (ElevenLabs)
+    eleven_labs_api_key: str = ""
+    eleven_labs_default_voice: str = "pNInz6obpgDQGcFmaJgB"  # Adam voice
 
     # Apollo.io (People Search / Enrichment)
     apollo_api_key: str = ""

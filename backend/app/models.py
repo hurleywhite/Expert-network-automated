@@ -49,6 +49,26 @@ class ConversationStatus(str, PyEnum):
     UNKNOWN = "unknown"
 
 
+class InterviewStatus(str, PyEnum):
+    SCHEDULED = "scheduled"
+    IN_PROGRESS = "in_progress"
+    COMPLETED = "completed"
+    CANCELLED = "cancelled"
+    FAILED = "failed"
+
+
+class InterviewType(str, PyEnum):
+    FOLLOW_UP = "follow_up"  # Post-outreach interview
+    QUALIFICATION = "qualification"  # Pre-outreach screening
+    DEEP_DIVE = "deep_dive"  # Detailed expert interview
+
+
+class MessageType(str, PyEnum):
+    AI_QUESTION = "ai_question"
+    HUMAN_RESPONSE = "human_response"
+    SYSTEM = "system"
+
+
 class MessageDirection(str, PyEnum):
     INBOUND = "inbound"
     OUTBOUND = "outbound"
@@ -300,3 +320,135 @@ class RejectionLearning(Base):
     __table_args__ = (
         Index("ix_rejection_learning_project", "project_id"),
     )
+
+
+class InterviewTemplate(Base):
+    """Templates for AI-moderated interviews with different objectives."""
+    __tablename__ = "interview_templates"
+
+    id = Column(UUID(as_uuid=True), primary_key=True, default=uuid.uuid4)
+    name = Column(String, nullable=False)
+    description = Column(Text)
+    interview_type = Column(
+        Enum(
+            InterviewType,
+            name="interviewtype",
+            create_type=True,
+            values_callable=lambda x: [e.value for e in x],
+        ),
+        nullable=False,
+    )
+    opening_prompt = Column(Text, nullable=False)  # AI's introduction
+    question_flow = Column(JSON, default=list)  # Structured questions
+    follow_up_rules = Column(JSON, default=dict)  # How AI should follow up
+    success_criteria = Column(JSON, default=dict)  # What makes a good interview
+    estimated_duration_minutes = Column(Integer, default=15)
+    created_by = Column(String, nullable=False)
+    created_at = Column(DateTime, default=datetime.utcnow, nullable=False)
+    updated_at = Column(DateTime, default=datetime.utcnow, onupdate=datetime.utcnow)
+
+    sessions = relationship("InterviewSession", back_populates="template")
+
+
+class InterviewSession(Base):
+    """AI-moderated interview sessions with candidates."""
+    __tablename__ = "interview_sessions"
+
+    id = Column(UUID(as_uuid=True), primary_key=True, default=uuid.uuid4)
+    candidate_id = Column(UUID(as_uuid=True), ForeignKey("candidates.id"), nullable=False)
+    project_id = Column(UUID(as_uuid=True), ForeignKey("project_briefs.id"), nullable=False)
+    template_id = Column(UUID(as_uuid=True), ForeignKey("interview_templates.id"), nullable=False)
+    
+    status = Column(
+        Enum(
+            InterviewStatus,
+            name="interviewstatus",
+            create_type=True,
+            values_callable=lambda x: [e.value for e in x],
+        ),
+        default=InterviewStatus.SCHEDULED,
+        nullable=False,
+    )
+    
+    # Scheduling
+    scheduled_for = Column(DateTime)
+    timezone = Column(String)
+    
+    # Session info
+    started_at = Column(DateTime)
+    completed_at = Column(DateTime)
+    duration_seconds = Column(Integer)
+    
+    # Video/Audio settings
+    video_enabled = Column(Boolean, default=True)
+    audio_enabled = Column(Boolean, default=True)
+    recording_enabled = Column(Boolean, default=True)
+    
+    # AI settings
+    ai_voice_id = Column(String)  # ElevenLabs voice ID
+    ai_personality = Column(JSON, default=dict)  # Custom AI behavior
+    
+    # Results
+    summary = Column(Text)
+    key_insights = Column(JSON, default=list)
+    qualification_score = Column(Float)
+    next_steps = Column(JSON, default=list)
+    
+    # Technical
+    meet_link = Column(String)
+    recording_url = Column(String)
+    transcript_url = Column(String)
+    
+    created_by = Column(String, nullable=False)
+    created_at = Column(DateTime, default=datetime.utcnow, nullable=False)
+    updated_at = Column(DateTime, default=datetime.utcnow, onupdate=datetime.utcnow)
+
+    __table_args__ = (
+        Index("ix_interview_session_candidate", "candidate_id"),
+        Index("ix_interview_session_project", "project_id"),
+        Index("ix_interview_session_status", "status"),
+    )
+
+    candidate = relationship("Candidate")
+    project = relationship("ProjectBrief")
+    template = relationship("InterviewTemplate", back_populates="sessions")
+    messages = relationship("InterviewMessage", back_populates="session")
+
+
+class InterviewMessage(Base):
+    """Individual messages within an AI interview session."""
+    __tablename__ = "interview_messages"
+
+    id = Column(UUID(as_uuid=True), primary_key=True, default=uuid.uuid4)
+    session_id = Column(UUID(as_uuid=True), ForeignKey("interview_sessions.id"), nullable=False)
+    
+    message_type = Column(
+        Enum(
+            MessageType,
+            name="messagetype",
+            create_type=True,
+            values_callable=lambda x: [e.value for e in x],
+        ),
+        nullable=False,
+    )
+    
+    # Content
+    text_content = Column(Text)
+    audio_url = Column(String)  # Audio file URL
+    duration_seconds = Column(Float)
+    
+    # AI analysis
+    sentiment_score = Column(Float)
+    emotion_detected = Column(String)
+    confidence_score = Column(Float)
+    
+    # Timing
+    timestamp_seconds = Column(Float)  # Seconds from interview start
+    created_at = Column(DateTime, default=datetime.utcnow, nullable=False)
+
+    __table_args__ = (
+        Index("ix_interview_message_session", "session_id"),
+        Index("ix_interview_message_type", "message_type"),
+    )
+
+    session = relationship("InterviewSession", back_populates="messages")

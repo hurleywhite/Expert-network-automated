@@ -27,6 +27,11 @@ export default function ProjectDetail() {
   const [bulkApproving, setBulkApproving] = useState(false);
   const [sending, setSending] = useState(false);
   const [successMessage, setSuccessMessage] = useState<string | null>(null);
+  const [expandedApproved, setExpandedApproved] = useState<string | null>(null);
+  const [editingDraft, setEditingDraft] = useState<string | null>(null);
+  const [editSubject, setEditSubject] = useState('');
+  const [editBody, setEditBody] = useState('');
+  const [saving, setSaving] = useState(false);
 
   // Refs for scrolling to sections
   const candidatesRef = useRef<HTMLDivElement>(null);
@@ -137,6 +142,35 @@ export default function ProjectDetail() {
       console.error(err);
     } finally {
       setSending(false);
+      setTimeout(() => setSuccessMessage(null), 3000);
+    }
+  };
+
+  const handleStartEdit = (draftId: string, subject: string, body: string) => {
+    setEditingDraft(draftId);
+    setEditSubject(subject);
+    setEditBody(body);
+    setExpandedApproved(draftId);
+  };
+
+  const handleCancelEdit = () => {
+    setEditingDraft(null);
+    setEditSubject('');
+    setEditBody('');
+  };
+
+  const handleSaveEdit = async (draftId: string) => {
+    setSaving(true);
+    try {
+      await draftsApi.update(draftId, { subject: editSubject, body: editBody });
+      setSuccessMessage('Draft updated - needs re-approval');
+      setEditingDraft(null);
+      await loadData();
+    } catch (err) {
+      setError('Failed to update draft');
+      console.error(err);
+    } finally {
+      setSaving(false);
       setTimeout(() => setSuccessMessage(null), 3000);
     }
   };
@@ -543,7 +577,7 @@ export default function ProjectDetail() {
             {approvedDrafts.approved.drafts.map((draft) => (
               <div key={draft.draft_id} className="p-4">
                 <div className="flex items-center justify-between">
-                  <div>
+                  <div className="flex-1">
                     <p className="font-medium text-gray-900">{draft.candidate_name}</p>
                     {draft.candidate_linkedin && (
                       <a
@@ -558,13 +592,90 @@ export default function ProjectDetail() {
                     <p className="text-sm text-gray-600">{draft.candidate_title} at {draft.candidate_company}</p>
                     <p className="text-sm text-gray-500">{draft.candidate_email}</p>
                   </div>
-                  <span className="inline-flex items-center px-2.5 py-0.5 rounded-full text-xs font-medium bg-green-100 text-green-800">
-                    Approved
-                  </span>
+                  <div className="flex items-center gap-2">
+                    <button
+                      onClick={() => setExpandedApproved(expandedApproved === draft.draft_id ? null : draft.draft_id)}
+                      className="text-gray-400 hover:text-gray-600"
+                    >
+                      <svg
+                        className={`h-5 w-5 transform transition-transform ${expandedApproved === draft.draft_id ? 'rotate-180' : ''}`}
+                        fill="none"
+                        viewBox="0 0 24 24"
+                        stroke="currentColor"
+                      >
+                        <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M19 9l-7 7-7-7" />
+                      </svg>
+                    </button>
+                    <span className="inline-flex items-center px-2.5 py-0.5 rounded-full text-xs font-medium bg-green-100 text-green-800">
+                      Approved
+                    </span>
+                  </div>
                 </div>
-                <p className="mt-2 text-sm text-gray-700">
-                  <span className="font-medium">Subject:</span> {draft.subject}
-                </p>
+
+                {/* Subject - editable if in edit mode */}
+                {editingDraft === draft.draft_id ? (
+                  <div className="mt-2">
+                    <label className="text-sm font-medium text-gray-700">Subject:</label>
+                    <input
+                      type="text"
+                      value={editSubject}
+                      onChange={(e) => setEditSubject(e.target.value)}
+                      className="mt-1 block w-full rounded-md border border-gray-300 px-3 py-2 text-sm focus:border-blue-500 focus:ring-blue-500"
+                    />
+                  </div>
+                ) : (
+                  <p className="mt-2 text-sm text-gray-700">
+                    <span className="font-medium">Subject:</span> {draft.subject}
+                  </p>
+                )}
+
+                {/* Expanded content */}
+                {expandedApproved === draft.draft_id && (
+                  <div className="mt-4">
+                    {editingDraft === draft.draft_id ? (
+                      <div>
+                        <label className="text-sm font-medium text-gray-700">Email Body:</label>
+                        <textarea
+                          value={editBody}
+                          onChange={(e) => setEditBody(e.target.value)}
+                          rows={10}
+                          className="mt-1 block w-full rounded-md border border-gray-300 px-3 py-2 text-sm focus:border-blue-500 focus:ring-blue-500"
+                        />
+                        <div className="mt-3 flex gap-2">
+                          <button
+                            onClick={() => handleSaveEdit(draft.draft_id)}
+                            disabled={saving}
+                            className="inline-flex items-center px-3 py-1.5 border border-transparent text-sm font-medium rounded-md shadow-sm text-white bg-blue-600 hover:bg-blue-700 disabled:bg-gray-400"
+                          >
+                            {saving ? 'Saving...' : 'Save Changes'}
+                          </button>
+                          <button
+                            onClick={handleCancelEdit}
+                            className="inline-flex items-center px-3 py-1.5 border border-gray-300 text-sm font-medium rounded-md shadow-sm text-gray-700 bg-white hover:bg-gray-50"
+                          >
+                            Cancel
+                          </button>
+                        </div>
+                        <p className="mt-2 text-xs text-orange-600">
+                          Note: Saving changes will require re-approval before sending.
+                        </p>
+                      </div>
+                    ) : (
+                      <div>
+                        <p className="text-sm font-medium text-gray-700 mb-2">Email Body:</p>
+                        <div className="bg-gray-50 rounded-lg p-4 text-sm text-gray-800 whitespace-pre-wrap border border-gray-200">
+                          {draft.body}
+                        </div>
+                        <button
+                          onClick={() => handleStartEdit(draft.draft_id, draft.subject, draft.body)}
+                          className="mt-3 inline-flex items-center px-3 py-1.5 border border-gray-300 text-sm font-medium rounded-md shadow-sm text-gray-700 bg-white hover:bg-gray-50"
+                        >
+                          Edit Draft
+                        </button>
+                      </div>
+                    )}
+                  </div>
+                )}
               </div>
             ))}
           </div>
@@ -584,7 +695,7 @@ export default function ProjectDetail() {
             {approvedDrafts.sent.drafts.map((draft) => (
               <div key={draft.draft_id} className="p-4">
                 <div className="flex items-center justify-between">
-                  <div>
+                  <div className="flex-1">
                     <p className="font-medium text-gray-900">{draft.candidate_name}</p>
                     {draft.candidate_linkedin && (
                       <a
@@ -599,13 +710,38 @@ export default function ProjectDetail() {
                     <p className="text-sm text-gray-600">{draft.candidate_title} at {draft.candidate_company}</p>
                     <p className="text-sm text-gray-500">{draft.candidate_email}</p>
                   </div>
-                  <span className="inline-flex items-center px-2.5 py-0.5 rounded-full text-xs font-medium bg-blue-100 text-blue-800">
-                    Sent
-                  </span>
+                  <div className="flex items-center gap-2">
+                    <button
+                      onClick={() => setExpandedApproved(expandedApproved === draft.draft_id ? null : draft.draft_id)}
+                      className="text-gray-400 hover:text-gray-600"
+                    >
+                      <svg
+                        className={`h-5 w-5 transform transition-transform ${expandedApproved === draft.draft_id ? 'rotate-180' : ''}`}
+                        fill="none"
+                        viewBox="0 0 24 24"
+                        stroke="currentColor"
+                      >
+                        <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M19 9l-7 7-7-7" />
+                      </svg>
+                    </button>
+                    <span className="inline-flex items-center px-2.5 py-0.5 rounded-full text-xs font-medium bg-blue-100 text-blue-800">
+                      Sent
+                    </span>
+                  </div>
                 </div>
                 <p className="mt-2 text-sm text-gray-700">
                   <span className="font-medium">Subject:</span> {draft.subject}
                 </p>
+
+                {/* Expanded content - view only for sent */}
+                {expandedApproved === draft.draft_id && (
+                  <div className="mt-4">
+                    <p className="text-sm font-medium text-gray-700 mb-2">Email Body:</p>
+                    <div className="bg-gray-50 rounded-lg p-4 text-sm text-gray-800 whitespace-pre-wrap border border-gray-200">
+                      {draft.body}
+                    </div>
+                  </div>
+                )}
               </div>
             ))}
           </div>

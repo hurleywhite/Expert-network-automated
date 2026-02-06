@@ -92,6 +92,7 @@ export interface ApprovedDraft {
   candidate_email: string;
   candidate_linkedin?: string | null;
   subject: string;
+  body: string;
   approved_at: string | null;
   approved_by: string | null;
   status: 'approved' | 'sent';
@@ -126,4 +127,86 @@ export interface ProjectCandidatesResponse {
   project_id: string;
   total: number;
   candidates: ScoredCandidate[];
+}
+
+// Interview Types
+export type InterviewType = 'follow_up' | 'qualification' | 'deep_dive';
+export type InterviewStatus = 'scheduled' | 'in_progress' | 'completed' | 'cancelled' | 'failed';
+export type MessageType = 'ai_question' | 'human_response' | 'system';
+
+export interface InterviewTemplate {
+  id: string;
+  name: string;
+  description?: string;
+  interview_type: InterviewType;
+  estimated_duration_minutes: number;
+  created_at: string;
+}
+
+export interface InterviewSession {
+  id: string;
+  candidate_id: string;
+  project_id: string;
+  template_id: string;
+  status: InterviewStatus;
+  scheduled_for?: string;
+  started_at?: string;
+  completed_at?: string;
+  duration_seconds?: number;
+  meet_link?: string;
+  summary?: string;
+  qualification_score?: number;
+  candidate?: {
+    full_name: string;
+    title: string;
+    company: string;
+    email: string;
+  };
+  template?: InterviewTemplate;
+}
+
+export interface InterviewMessage {
+  id: string;
+  message_type: MessageType;
+  text_content?: string;
+  audio_url?: string;
+  timestamp_seconds: number;
+  sentiment_score?: number;
+  emotion_detected?: string;
+}
+
+export interface CreateInterviewSessionRequest {
+  candidate_id: string;
+  project_id: string;
+  template_id: string;
+  scheduled_for: string;
+  timezone?: string;
+  video_enabled?: boolean;
+  ai_voice_id?: string;
+}
+
+export interface HumanResponseRequest {
+  text: string;
+  timestamp_seconds: number;
+  audio_url?: string;
+}
+
+export interface InterviewStartResponse {
+  session_id: string;
+  status: string;
+  opening_message: {
+    id: string;
+    text: string;
+    audio_url?: string;
+  };
+  meet_link: string;
+}
+
+export interface InterviewResponseResult {
+  ai_response: {
+    id?: string;
+    text?: string;
+    audio_url?: string;
+  };
+  session_status: string;
 }

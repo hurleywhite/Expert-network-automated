@@ -419,6 +419,7 @@ def get_approved_drafts(
             "candidate_email": candidate.email if candidate else "",
             "candidate_linkedin": candidate.linkedin_url if candidate else None,
             "subject": draft.subject,
+            "body": draft.body,
             "approved_at": draft.approved_at.isoformat() if draft.approved_at else None,
             "approved_by": draft.approved_by,
         }

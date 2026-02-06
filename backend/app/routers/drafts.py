@@ -70,6 +70,48 @@ def get_draft(
     return draft
 
 
+from pydantic import BaseModel
+
+class DraftUpdate(BaseModel):
+    """Request to update a draft's subject or body."""
+    subject: Optional[str] = None
+    body: Optional[str] = None
+
+
+@router.patch("/{draft_id}", response_model=schemas.MessageDraftResponse)
+def update_draft(
+    draft_id: UUID,
+    update: DraftUpdate,
+    db: Session = Depends(get_db),
+):
+    """
+    Update a draft's subject or body.
+
+    Use this to make minor tweaks before sending.
+    Note: Editing a draft will clear its approval status.
+    """
+    draft = crud.get_draft(db, draft_id)
+    if not draft:
+        raise HTTPException(status_code=404, detail="Draft not found")
+
+    # Update fields if provided
+    if update.subject is not None:
+        draft.subject = update.subject
+    if update.body is not None:
+        draft.body = update.body
+
+    # Clear approval if content changed (requires re-approval)
+    if update.subject is not None or update.body is not None:
+        draft.approved_at = None
+        draft.approved_by = None
+        draft.approval_hash = None
+
+    db.commit()
+    db.refresh(draft)
+
+    return draft
+
+
 @router.post("/{draft_id}/approve", response_model=schemas.MessageDraftResponse)
 def approve_draft(
     draft_id: UUID,

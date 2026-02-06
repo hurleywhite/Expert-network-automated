@@ -84,6 +84,11 @@ export const draftsApi = {
     });
     return response.data;
   },
+
+  update: async (draftId: string, data: { subject?: string; body?: string }): Promise<ApprovalResponse> => {
+    const response = await api.patch(`/drafts/${draftId}`, data);
+    return response.data;
+  },
 };
 
 export default api;
