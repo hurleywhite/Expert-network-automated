@@ -527,3 +527,135 @@ def get_project_candidates(
         "total": len(candidates),
         "candidates": candidates,
     }
+
+
+# ============ FOLLOW-UP ENDPOINTS ============
+
+class FollowupContextRequest(BaseModel):
+    """Request to generate follow-up drafts with context."""
+    research_topic: Optional[str] = None
+    rate_range: Optional[str] = None
+    sender_name: Optional[str] = None
+    limit: Optional[int] = None
+
+
+@router.get("/{project_id}/followup-queue")
+def get_followup_queue(
+    project_id: UUID,
+    days_since_sent: int = 3,
+    db: Session = Depends(get_db),
+):
+    """
+    Get sent emails ready for follow-up.
+
+    Returns candidates who:
+    - Received initial email more than X days ago
+    - Haven't replied
+    - Don't have a follow-up draft yet
+
+    Use this to decide who needs a follow-up reminder.
+    """
+    result = Pipeline.get_followup_queue(db, project_id, days_since_sent)
+    if "error" in result:
+        raise HTTPException(status_code=404, detail=result["error"])
+    return result
+
+
+@router.post("/{project_id}/generate-followups")
+def generate_followup_drafts(
+    project_id: UUID,
+    request: Optional[FollowupContextRequest] = None,
+    db: Session = Depends(get_db),
+):
+    """
+    Generate follow-up email drafts for candidates without replies.
+
+    Uses a follow-up template that references the original outreach.
+    Optionally provide context to customize the follow-up.
+    """
+    outreach_context = None
+    limit = None
+    if request:
+        outreach_context = {
+            "research_topic": request.research_topic,
+            "rate_range": request.rate_range,
+            "sender_name": request.sender_name,
+        }
+        limit = request.limit
+
+    result = Pipeline.generate_followup_drafts(
+        db, project_id, outreach_context=outreach_context, limit=limit
+    )
+    if "error" in result:
+        raise HTTPException(status_code=404, detail=result["error"])
+    return result
+
+
+@router.get("/{project_id}/followups")
+def get_followup_drafts(
+    project_id: UUID,
+    db: Session = Depends(get_db),
+):
+    """
+    Get all follow-up drafts for a project.
+
+    Returns follow-up drafts grouped by status:
+    - pending: Generated but not yet approved
+    - approved: Approved and ready to send
+    - sent: Already sent
+    """
+    result = Pipeline.get_followup_drafts(db, project_id)
+    if "error" in result:
+        raise HTTPException(status_code=404, detail=result["error"])
+    return result
+
+
+@router.post("/{project_id}/send-followups")
+def send_followup_drafts(
+    project_id: UUID,
+    payload: BulkSendRequest,
+    db: Session = Depends(get_db),
+):
+    """
+    Send approved follow-up drafts.
+
+    Same rate-limiting and tracking as initial emails.
+    """
+    # Get approved follow-up drafts not yet sent
+    query = (
+        db.query(models.MessageDraft)
+        .filter(
+            models.MessageDraft.project_id == project_id,
+            models.MessageDraft.approved_at != None,
+            models.MessageDraft.sequence_number > 1,  # Follow-ups only
+        )
+    )
+
+    # Exclude already sent
+    sent_draft_ids = (
+        db.query(models.OutboundEvent.message_draft_id)
+        .filter(
+            models.OutboundEvent.project_id == project_id,
+            models.OutboundEvent.status == models.OutboundEventStatus.SENT,
+        )
+        .subquery()
+    )
+
+    drafts = query.filter(
+        ~models.MessageDraft.id.in_(sent_draft_ids)
+    ).all()
+
+    if payload.limit:
+        drafts = drafts[:payload.limit]
+
+    jobs_enqueued = 0
+    for draft in drafts:
+        default_queue.enqueue(send_job, str(draft.id), payload.actor)
+        jobs_enqueued += 1
+
+    return {
+        "project_id": str(project_id),
+        "jobs_enqueued": jobs_enqueued,
+        "actor": payload.actor,
+        "type": "followup",
+    }

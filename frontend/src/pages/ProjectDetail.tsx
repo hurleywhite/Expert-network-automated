@@ -1,7 +1,7 @@
 import { useState, useEffect, useCallback, useRef } from 'react';
 import { useParams, Link } from 'react-router-dom';
 import { projectsApi, draftsApi } from '../api/client';
-import type { Project, PipelineStatus, ReviewQueue, ApprovedDraftsResponse, ProjectCandidatesResponse } from '../types';
+import type { Project, PipelineStatus, ReviewQueue, ApprovedDraftsResponse, ProjectCandidatesResponse, FollowupQueueResponse, FollowupDraftsResponse } from '../types';
 import StatusCard from '../components/StatusCard';
 import DraftCard from '../components/DraftCard';
 
@@ -33,11 +33,19 @@ export default function ProjectDetail() {
   const [editBody, setEditBody] = useState('');
   const [saving, setSaving] = useState(false);
 
+  // Follow-up state
+  const [followupQueue, setFollowupQueue] = useState<FollowupQueueResponse | null>(null);
+  const [followupDrafts, setFollowupDrafts] = useState<FollowupDraftsResponse | null>(null);
+  const [generatingFollowups, setGeneratingFollowups] = useState(false);
+  const [sendingFollowups, setSendingFollowups] = useState(false);
+  const [expandedFollowup, setExpandedFollowup] = useState<string | null>(null);
+
   // Refs for scrolling to sections
   const candidatesRef = useRef<HTMLDivElement>(null);
   const pendingReviewRef = useRef<HTMLDivElement>(null);
   const approvedRef = useRef<HTMLDivElement>(null);
   const sentRef = useRef<HTMLDivElement>(null);
+  const followupRef = useRef<HTMLDivElement>(null);
 
   const scrollToSection = (ref: React.RefObject<HTMLDivElement | null>, expand?: () => void) => {
     if (expand) expand();
@@ -71,6 +79,18 @@ export default function ProjectDetail() {
       } catch (candidatesErr) {
         console.error('Failed to load candidates:', candidatesErr);
         // Don't fail the whole page, just skip candidates
+      }
+
+      // Load follow-up data (non-critical)
+      try {
+        const [followupQueueData, followupDraftsData] = await Promise.all([
+          projectsApi.getFollowupQueue(projectId),
+          projectsApi.getFollowups(projectId),
+        ]);
+        setFollowupQueue(followupQueueData);
+        setFollowupDrafts(followupDraftsData);
+      } catch (followupErr) {
+        console.error('Failed to load follow-up data:', followupErr);
       }
     } catch (err) {
       setError('Failed to load project data');
@@ -171,6 +191,53 @@ export default function ProjectDetail() {
       console.error(err);
     } finally {
       setSaving(false);
+      setTimeout(() => setSuccessMessage(null), 3000);
+    }
+  };
+
+  const handleGenerateFollowups = async () => {
+    if (!projectId) return;
+    setGeneratingFollowups(true);
+    try {
+      const result = await projectsApi.generateFollowups(projectId);
+      setSuccessMessage(`Generated ${result.drafted} follow-up drafts`);
+      await loadData();
+    } catch (err) {
+      setError('Failed to generate follow-ups');
+      console.error(err);
+    } finally {
+      setGeneratingFollowups(false);
+      setTimeout(() => setSuccessMessage(null), 3000);
+    }
+  };
+
+  const handleSendFollowups = async () => {
+    if (!projectId) return;
+    setSendingFollowups(true);
+    try {
+      const result = await projectsApi.sendFollowups(projectId, 'user');
+      setSuccessMessage(`Queued ${result.jobs_enqueued} follow-up emails`);
+      await loadData();
+    } catch (err) {
+      setError('Failed to send follow-ups');
+      console.error(err);
+    } finally {
+      setSendingFollowups(false);
+      setTimeout(() => setSuccessMessage(null), 3000);
+    }
+  };
+
+  const handleApproveFollowup = async (draftId: string) => {
+    setApprovingDraft(draftId);
+    try {
+      await draftsApi.approve(draftId, 'user');
+      setSuccessMessage('Follow-up approved');
+      await loadData();
+    } catch (err) {
+      setError('Failed to approve follow-up');
+      console.error(err);
+    } finally {
+      setApprovingDraft(null);
       setTimeout(() => setSuccessMessage(null), 3000);
     }
   };
@@ -746,6 +813,179 @@ export default function ProjectDetail() {
           </div>
         </div>
       )}
+
+      {/* Follow-up Section */}
+      {(followupQueue?.ready_for_followup.count || 0) > 0 || (followupDrafts?.pending.count || 0) > 0 || (followupDrafts?.approved.count || 0) > 0 || (followupDrafts?.sent.count || 0) > 0 ? (
+        <div className="mt-8" ref={followupRef}>
+          <h2 className="text-xl font-bold text-gray-900 mb-4 flex items-center">
+            <svg className="w-6 h-6 mr-2 text-purple-600" fill="none" viewBox="0 0 24 24" stroke="currentColor">
+              <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M3 8l7.89 5.26a2 2 0 002.22 0L21 8M5 19h14a2 2 0 002-2V7a2 2 0 00-2-2H5a2 2 0 00-2 2v10a2 2 0 002 2z" />
+            </svg>
+            Follow-ups
+          </h2>
+
+          {/* Ready for Follow-up */}
+          {followupQueue && followupQueue.ready_for_followup.count > 0 && !followupDrafts?.pending.count && (
+            <div className="bg-purple-50 border border-purple-200 rounded-lg p-4 mb-4">
+              <div className="flex items-center justify-between">
+                <div>
+                  <p className="font-medium text-purple-900">
+                    {followupQueue.ready_for_followup.count} candidates ready for follow-up
+                  </p>
+                  <p className="text-sm text-purple-700">
+                    These candidates were emailed 3+ days ago with no reply
+                  </p>
+                </div>
+                <button
+                  onClick={handleGenerateFollowups}
+                  disabled={generatingFollowups}
+                  className={`inline-flex items-center px-4 py-2 border border-transparent text-sm font-medium rounded-md shadow-sm text-white ${
+                    generatingFollowups
+                      ? 'bg-gray-400 cursor-not-allowed'
+                      : 'bg-purple-600 hover:bg-purple-700'
+                  }`}
+                >
+                  {generatingFollowups ? 'Generating...' : 'Generate Follow-up Drafts'}
+                </button>
+              </div>
+            </div>
+          )}
+
+          {/* Pending Follow-up Drafts */}
+          {followupDrafts && followupDrafts.pending.count > 0 && (
+            <div className="mb-6">
+              <h3 className="text-lg font-semibold text-gray-900 mb-3 flex items-center">
+                <span className="inline-flex items-center justify-center w-6 h-6 rounded-full bg-orange-100 text-orange-600 text-sm font-bold mr-2">
+                  {followupDrafts.pending.count}
+                </span>
+                Pending Follow-up Review
+              </h3>
+              <div className="bg-white rounded-lg shadow border border-orange-200 divide-y divide-gray-100">
+                {followupDrafts.pending.drafts.map((draft) => (
+                  <div key={draft.draft_id} className="p-4">
+                    <div className="flex items-center justify-between">
+                      <div className="flex-1">
+                        <p className="font-medium text-gray-900">{draft.candidate_name}</p>
+                        {draft.candidate_linkedin && (
+                          <a href={draft.candidate_linkedin} target="_blank" rel="noopener noreferrer" className="text-xs text-blue-600 hover:underline">
+                            LinkedIn
+                          </a>
+                        )}
+                        <p className="text-sm text-gray-600">{draft.candidate_title} at {draft.candidate_company}</p>
+                      </div>
+                      <div className="flex items-center gap-2">
+                        <button
+                          onClick={() => setExpandedFollowup(expandedFollowup === draft.draft_id ? null : draft.draft_id)}
+                          className="text-gray-400 hover:text-gray-600"
+                        >
+                          <svg className={`h-5 w-5 transform transition-transform ${expandedFollowup === draft.draft_id ? 'rotate-180' : ''}`} fill="none" viewBox="0 0 24 24" stroke="currentColor">
+                            <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M19 9l-7 7-7-7" />
+                          </svg>
+                        </button>
+                        <button
+                          onClick={() => handleApproveFollowup(draft.draft_id)}
+                          disabled={approvingDraft === draft.draft_id}
+                          className={`inline-flex items-center px-3 py-1.5 border border-transparent text-sm font-medium rounded-md shadow-sm text-white ${
+                            approvingDraft === draft.draft_id
+                              ? 'bg-gray-400 cursor-not-allowed'
+                              : 'bg-green-600 hover:bg-green-700'
+                          }`}
+                        >
+                          {approvingDraft === draft.draft_id ? 'Approving...' : 'Approve'}
+                        </button>
+                      </div>
+                    </div>
+                    <p className="mt-2 text-sm text-gray-700">
+                      <span className="font-medium">Subject:</span> {draft.subject}
+                    </p>
+                    {expandedFollowup === draft.draft_id && (
+                      <div className="mt-4">
+                        <p className="text-sm font-medium text-gray-700 mb-2">Follow-up Body:</p>
+                        <div className="bg-gray-50 rounded-lg p-4 text-sm text-gray-800 whitespace-pre-wrap border border-gray-200">
+                          {draft.body}
+                        </div>
+                      </div>
+                    )}
+                  </div>
+                ))}
+              </div>
+            </div>
+          )}
+
+          {/* Approved Follow-ups Ready to Send */}
+          {followupDrafts && followupDrafts.approved.count > 0 && (
+            <div className="mb-6">
+              <div className="flex items-center justify-between mb-3">
+                <h3 className="text-lg font-semibold text-gray-900 flex items-center">
+                  <span className="inline-flex items-center justify-center w-6 h-6 rounded-full bg-green-100 text-green-600 text-sm font-bold mr-2">
+                    {followupDrafts.approved.count}
+                  </span>
+                  Approved Follow-ups (Ready to Send)
+                </h3>
+                <button
+                  onClick={handleSendFollowups}
+                  disabled={sendingFollowups}
+                  className={`inline-flex items-center px-4 py-2 border border-transparent text-sm font-medium rounded-md shadow-sm text-white ${
+                    sendingFollowups
+                      ? 'bg-gray-400 cursor-not-allowed'
+                      : 'bg-blue-600 hover:bg-blue-700'
+                  }`}
+                >
+                  {sendingFollowups ? 'Sending...' : `Send ${followupDrafts.approved.count} Follow-ups`}
+                </button>
+              </div>
+              <div className="bg-white rounded-lg shadow border border-green-200 divide-y divide-gray-100">
+                {followupDrafts.approved.drafts.map((draft) => (
+                  <div key={draft.draft_id} className="p-4">
+                    <div className="flex items-center justify-between">
+                      <div>
+                        <p className="font-medium text-gray-900">{draft.candidate_name}</p>
+                        <p className="text-sm text-gray-600">{draft.candidate_title} at {draft.candidate_company}</p>
+                      </div>
+                      <span className="inline-flex items-center px-2.5 py-0.5 rounded-full text-xs font-medium bg-green-100 text-green-800">
+                        Ready
+                      </span>
+                    </div>
+                    <p className="mt-2 text-sm text-gray-700">
+                      <span className="font-medium">Subject:</span> {draft.subject}
+                    </p>
+                  </div>
+                ))}
+              </div>
+            </div>
+          )}
+
+          {/* Sent Follow-ups */}
+          {followupDrafts && followupDrafts.sent.count > 0 && (
+            <div>
+              <h3 className="text-lg font-semibold text-gray-900 mb-3 flex items-center">
+                <span className="inline-flex items-center justify-center w-6 h-6 rounded-full bg-purple-100 text-purple-600 text-sm font-bold mr-2">
+                  {followupDrafts.sent.count}
+                </span>
+                Follow-ups Sent
+              </h3>
+              <div className="bg-white rounded-lg shadow border border-purple-200 divide-y divide-gray-100">
+                {followupDrafts.sent.drafts.map((draft) => (
+                  <div key={draft.draft_id} className="p-4">
+                    <div className="flex items-center justify-between">
+                      <div>
+                        <p className="font-medium text-gray-900">{draft.candidate_name}</p>
+                        <p className="text-sm text-gray-600">{draft.candidate_title} at {draft.candidate_company}</p>
+                      </div>
+                      <span className="inline-flex items-center px-2.5 py-0.5 rounded-full text-xs font-medium bg-purple-100 text-purple-800">
+                        Follow-up Sent
+                      </span>
+                    </div>
+                    <p className="mt-2 text-sm text-gray-700">
+                      <span className="font-medium">Subject:</span> {draft.subject}
+                    </p>
+                  </div>
+                ))}
+              </div>
+            </div>
+          )}
+        </div>
+      ) : null}
     </div>
   );
 }

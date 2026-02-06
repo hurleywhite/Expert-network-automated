@@ -129,6 +129,61 @@ export interface ProjectCandidatesResponse {
   candidates: ScoredCandidate[];
 }
 
+// Follow-up Types
+export interface FollowupCandidate {
+  candidate_id: string;
+  candidate_name: string;
+  candidate_title: string;
+  candidate_company: string;
+  candidate_email: string;
+  candidate_linkedin: string | null;
+  original_draft_id: string;
+  original_subject: string;
+  sent_at: string;
+  days_since_sent: number;
+}
+
+export interface FollowupQueueResponse {
+  project_id: string;
+  ready_for_followup: {
+    count: number;
+    candidates: FollowupCandidate[];
+  };
+}
+
+export interface FollowupDraft {
+  draft_id: string;
+  candidate_id: string;
+  candidate_name: string;
+  candidate_title: string;
+  candidate_company: string;
+  candidate_email: string;
+  candidate_linkedin: string | null;
+  subject: string;
+  body: string;
+  sequence_number: number;
+  status: 'pending' | 'approved' | 'sent';
+  approved_at?: string;
+  approved_by?: string;
+  created_at: string;
+}
+
+export interface FollowupDraftsResponse {
+  project_id: string;
+  pending: {
+    count: number;
+    drafts: FollowupDraft[];
+  };
+  approved: {
+    count: number;
+    drafts: FollowupDraft[];
+  };
+  sent: {
+    count: number;
+    drafts: FollowupDraft[];
+  };
+}
+
 // Interview Types
 export type InterviewType = 'follow_up' | 'qualification' | 'deep_dive';
 export type InterviewStatus = 'scheduled' | 'in_progress' | 'completed' | 'cancelled' | 'failed';

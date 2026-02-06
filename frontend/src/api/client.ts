@@ -8,6 +8,8 @@ import type {
   SendResponse,
   ApprovedDraftsResponse,
   ProjectCandidatesResponse,
+  FollowupQueueResponse,
+  FollowupDraftsResponse,
 } from '../types';
 
 // API configuration
@@ -65,6 +67,37 @@ export const projectsApi = {
 
   getCandidates: async (id: string): Promise<ProjectCandidatesResponse> => {
     const response = await api.get(`/projects/${id}/candidates`);
+    return response.data;
+  },
+
+  // Follow-up methods
+  getFollowupQueue: async (id: string, daysSinceSent: number = 3): Promise<FollowupQueueResponse> => {
+    const response = await api.get(`/projects/${id}/followup-queue`, {
+      params: { days_since_sent: daysSinceSent },
+    });
+    return response.data;
+  },
+
+  generateFollowups: async (id: string, context?: {
+    research_topic?: string;
+    rate_range?: string;
+    sender_name?: string;
+    limit?: number;
+  }): Promise<{ drafted: number; errors: number }> => {
+    const response = await api.post(`/projects/${id}/generate-followups`, context || {});
+    return response.data;
+  },
+
+  getFollowups: async (id: string): Promise<FollowupDraftsResponse> => {
+    const response = await api.get(`/projects/${id}/followups`);
+    return response.data;
+  },
+
+  sendFollowups: async (id: string, actor: string, limit?: number): Promise<SendResponse> => {
+    const response = await api.post(`/projects/${id}/send-followups`, {
+      actor,
+      limit,
+    });
     return response.data;
   },
 };

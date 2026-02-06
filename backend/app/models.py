@@ -192,11 +192,14 @@ class MessageDraft(Base):
     approved_at = Column(DateTime)
     approved_by = Column(String)
     approved_hash = Column(String)
+    sequence_number = Column(Integer, default=1, nullable=False)  # 1=initial, 2+=follow-up
+    parent_draft_id = Column(UUID(as_uuid=True), ForeignKey("message_drafts.id"), nullable=True)
     created_at = Column(DateTime, default=datetime.utcnow, nullable=False)
 
     candidate = relationship("Candidate", back_populates="message_drafts")
     project = relationship("ProjectBrief", back_populates="message_drafts")
     outbound_events = relationship("OutboundEvent", back_populates="message_draft")
+    parent_draft = relationship("MessageDraft", remote_side="MessageDraft.id", backref="follow_ups")
 
 
 class OutboundEvent(Base):

@@ -684,3 +684,287 @@ class Pipeline:
         if sent < approved:
             return "Send approved drafts: POST /projects/{id}/send-approved"
         return "Monitor replies and follow up with interested experts"
+
+    # Follow-up email template
+    FOLLOWUP_TEMPLATE = """Hi {first_name},
+
+Just circling back from our last email, in case you were busy or it was buried. I'm still looking for a couple perspectives on {topic} for an internal analysis, and {credential} made me think you'd be a strong person to speak with.
+
+Would you be open to a 30-minute call this week or next? We can offer {rate} for 30 min for your time. No prep needed — I'd keep it focused on:
+• How {customers} evaluate {thing} and what actually drives decisions
+• Common pitfalls / failure modes you've seen in {process}
+• What you're seeing change in {market} over the next 12–18 months
+
+If you're open, feel free to share a couple times that work — or I can send a scheduling link.
+
+Best,
+{sender_name}"""
+
+    @classmethod
+    def get_followup_queue(
+        cls, db: Session, project_id: UUID, days_since_sent: int = 3
+    ) -> Dict[str, Any]:
+        """
+        Get sent emails that are ready for follow-up.
+
+        Returns emails that:
+        - Were sent successfully
+        - Have no reply yet
+        - Were sent more than days_since_sent days ago
+        - Don't already have a follow-up draft
+        """
+        from datetime import datetime, timedelta
+
+        project = crud.get_project(db, project_id)
+        if not project:
+            return {"error": "Project not found"}
+
+        cutoff = datetime.utcnow() - timedelta(days=days_since_sent)
+
+        # Get sent events for initial emails (sequence_number = 1)
+        sent_events = (
+            db.query(models.OutboundEvent)
+            .join(models.MessageDraft)
+            .filter(
+                models.OutboundEvent.project_id == project_id,
+                models.OutboundEvent.status == models.OutboundEventStatus.SENT,
+                models.OutboundEvent.created_at < cutoff,
+                models.MessageDraft.sequence_number == 1,
+            )
+            .all()
+        )
+
+        ready_for_followup = []
+
+        for event in sent_events:
+            candidate = crud.get_candidate(db, event.candidate_id)
+            if not candidate:
+                continue
+
+            # Check if there's a reply
+            has_reply = (
+                db.query(models.Conversation)
+                .filter(
+                    models.Conversation.candidate_id == event.candidate_id,
+                    models.Conversation.project_id == project_id,
+                    models.Conversation.last_status != models.ConversationStatus.NONE,
+                )
+                .first()
+            )
+            if has_reply:
+                continue
+
+            # Check if follow-up already exists
+            existing_followup = (
+                db.query(models.MessageDraft)
+                .filter(
+                    models.MessageDraft.candidate_id == event.candidate_id,
+                    models.MessageDraft.project_id == project_id,
+                    models.MessageDraft.sequence_number == 2,
+                )
+                .first()
+            )
+            if existing_followup:
+                continue
+
+            original_draft = event.message_draft
+
+            ready_for_followup.append({
+                "candidate_id": str(candidate.id),
+                "candidate_name": candidate.full_name,
+                "candidate_title": candidate.title,
+                "candidate_company": candidate.company,
+                "candidate_email": candidate.email,
+                "candidate_linkedin": candidate.linkedin_url,
+                "original_draft_id": str(original_draft.id),
+                "original_subject": original_draft.subject,
+                "sent_at": event.created_at.isoformat(),
+                "days_since_sent": (datetime.utcnow() - event.created_at).days,
+            })
+
+        return {
+            "project_id": str(project_id),
+            "ready_for_followup": {
+                "count": len(ready_for_followup),
+                "candidates": ready_for_followup,
+            },
+        }
+
+    @classmethod
+    def generate_followup_drafts(
+        cls,
+        db: Session,
+        project_id: UUID,
+        outreach_context: Optional[Dict[str, Any]] = None,
+        limit: Optional[int] = None,
+    ) -> Dict[str, Any]:
+        """
+        Generate follow-up drafts for sent emails without replies.
+
+        Uses the follow-up template with personalization based on original context.
+        """
+        project = crud.get_project(db, project_id)
+        if not project:
+            return {"error": "Project not found"}
+
+        # Get candidates ready for follow-up
+        queue = cls.get_followup_queue(db, project_id)
+        if "error" in queue:
+            return queue
+
+        candidates = queue["ready_for_followup"]["candidates"]
+        if limit:
+            candidates = candidates[:limit]
+
+        results = {
+            "total_eligible": len(queue["ready_for_followup"]["candidates"]),
+            "drafted": 0,
+            "errors": 0,
+            "drafts": [],
+        }
+
+        # Default context
+        context = outreach_context or {}
+        topic = context.get("research_topic", f"{project.industry or 'industry'} trends")
+        rate = context.get("rate_range", "$150-300")
+        sender_name = context.get("sender_name", "Research Team")
+
+        for candidate_info in candidates:
+            try:
+                candidate = crud.get_candidate(db, UUID(candidate_info["candidate_id"]))
+                original_draft = crud.get_draft(db, UUID(candidate_info["original_draft_id"]))
+
+                if not candidate or not original_draft:
+                    results["errors"] += 1
+                    continue
+
+                # Build credential from title/company
+                credential = f"your role as {candidate.title} at {candidate.company}"
+
+                # Infer context from project
+                customers = "teams" if "B2B" in (project.industry or "") else "customers"
+                thing = f"{project.industry or 'solutions'} tools and approaches"
+                process = f"{project.industry or 'business'} operations"
+                market = f"the {project.industry or 'market'} space"
+
+                # Generate follow-up body
+                body = cls.FOLLOWUP_TEMPLATE.format(
+                    first_name=candidate.first_name or candidate.full_name.split()[0],
+                    topic=topic,
+                    credential=credential,
+                    rate=rate,
+                    customers=customers,
+                    thing=thing,
+                    process=process,
+                    market=market,
+                    sender_name=sender_name,
+                )
+
+                # Create follow-up draft
+                followup = models.MessageDraft(
+                    candidate_id=candidate.id,
+                    project_id=project_id,
+                    subject=f"Re: {original_draft.subject}",
+                    body=body,
+                    facts_used=["follow_up_template", "original_draft"],
+                    risk_flags=[],
+                    sequence_number=2,
+                    parent_draft_id=original_draft.id,
+                )
+                db.add(followup)
+                db.commit()
+
+                results["drafted"] += 1
+                results["drafts"].append({
+                    "draft_id": str(followup.id),
+                    "candidate_name": candidate.full_name,
+                    "subject": followup.subject,
+                })
+
+            except Exception as e:
+                results["errors"] += 1
+                print(f"Error generating follow-up: {e}")
+
+        return results
+
+    @classmethod
+    def get_followup_drafts(
+        cls, db: Session, project_id: UUID
+    ) -> Dict[str, Any]:
+        """
+        Get all follow-up drafts for a project.
+
+        Returns drafts grouped by status: pending, approved, sent.
+        """
+        project = crud.get_project(db, project_id)
+        if not project:
+            return {"error": "Project not found"}
+
+        # Get follow-up drafts (sequence_number > 1)
+        followup_drafts = (
+            db.query(models.MessageDraft)
+            .filter(
+                models.MessageDraft.project_id == project_id,
+                models.MessageDraft.sequence_number > 1,
+            )
+            .all()
+        )
+
+        # Get sent follow-up IDs
+        sent_followup_ids = set(
+            row[0] for row in db.query(models.OutboundEvent.message_draft_id)
+            .filter(
+                models.OutboundEvent.project_id == project_id,
+                models.OutboundEvent.status == models.OutboundEventStatus.SENT,
+            )
+            .all()
+        )
+
+        pending = []
+        approved = []
+        sent = []
+
+        for draft in followup_drafts:
+            candidate = crud.get_candidate(db, draft.candidate_id)
+
+            draft_info = {
+                "draft_id": str(draft.id),
+                "candidate_id": str(draft.candidate_id),
+                "candidate_name": candidate.full_name if candidate else "Unknown",
+                "candidate_title": candidate.title if candidate else "",
+                "candidate_company": candidate.company if candidate else "",
+                "candidate_email": candidate.email if candidate else "",
+                "candidate_linkedin": candidate.linkedin_url if candidate else None,
+                "subject": draft.subject,
+                "body": draft.body,
+                "sequence_number": draft.sequence_number,
+                "created_at": draft.created_at.isoformat(),
+            }
+
+            if draft.id in sent_followup_ids:
+                draft_info["status"] = "sent"
+                sent.append(draft_info)
+            elif draft.approved_at:
+                draft_info["status"] = "approved"
+                draft_info["approved_at"] = draft.approved_at.isoformat()
+                draft_info["approved_by"] = draft.approved_by
+                approved.append(draft_info)
+            else:
+                draft_info["status"] = "pending"
+                pending.append(draft_info)
+
+        return {
+            "project_id": str(project_id),
+            "pending": {
+                "count": len(pending),
+                "drafts": pending,
+            },
+            "approved": {
+                "count": len(approved),
+                "drafts": approved,
+            },
+            "sent": {
+                "count": len(sent),
+                "drafts": sent,
+            },
+        }
