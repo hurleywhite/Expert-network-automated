@@ -37,6 +37,14 @@ class Settings(BaseSettings):
     # Apollo.io (People Search / Enrichment)
     apollo_api_key: str = ""
 
+    # Exa AI (Expert Research)
+    exa_api_key: str = ""
+
+    # LinkedIn Automation
+    linkedin_session_cookie: str = ""
+    linkedin_daily_connection_limit: int = 50
+    linkedin_daily_message_limit: int = 100
+
     # App
     environment: str = "development"
     log_level: str = "INFO"

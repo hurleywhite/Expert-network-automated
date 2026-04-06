@@ -1,3 +1,7 @@
+# Node
+node_modules/
+frontend/dist/
+
 # Python
 __pycache__/
 *.py[cod]
@@ -13,7 +17,7 @@ dist/
 downloads/
 eggs/
 .eggs/
-lib/
+# lib/
 lib64/
 parts/
 sdist/

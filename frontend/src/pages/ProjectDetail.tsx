@@ -1,991 +1,318 @@
-import { useState, useEffect, useCallback, useRef } from 'react';
+import { useState, useEffect } from 'react';
 import { useParams, Link } from 'react-router-dom';
-import { projectsApi, draftsApi } from '../api/client';
-import type { Project, PipelineStatus, ReviewQueue, ApprovedDraftsResponse, ProjectCandidatesResponse, FollowupQueueResponse, FollowupDraftsResponse } from '../types';
-import StatusCard from '../components/StatusCard';
-import DraftCard from '../components/DraftCard';
+import { projectsApi, expertNetworkApi, linkedInApi } from '../api/client';
+import type { Project, ProjectCategory, ExpertCard, LinkedInOutreachItem } from '../types';
+import CategorySection from '../components/CategorySection';
+import StatusBadge from '../components/StatusBadge';
 
-// Clean up project names for display
-function formatProjectName(name: string): string {
-  let cleaned = name.replace(/^Find\s+/i, '');
-  cleaned = cleaned.charAt(0).toUpperCase() + cleaned.slice(1);
-  return cleaned;
-}
+type Tab = 'experts' | 'all-experts' | 'outreach' | 'linkedin';
 
 export default function ProjectDetail() {
   const { projectId } = useParams<{ projectId: string }>();
   const [project, setProject] = useState<Project | null>(null);
-  const [status, setStatus] = useState<PipelineStatus | null>(null);
-  const [reviewQueue, setReviewQueue] = useState<ReviewQueue | null>(null);
-  const [approvedDrafts, setApprovedDrafts] = useState<ApprovedDraftsResponse | null>(null);
-  const [candidates, setCandidates] = useState<ProjectCandidatesResponse | null>(null);
-  const [showCandidates, setShowCandidates] = useState(false);
+  const [categories, setCategories] = useState<ProjectCategory[]>([]);
+  const [expertsByCategory, setExpertsByCategory] = useState<Record<string, ExpertCard[]>>({});
+  const [allExperts, setAllExperts] = useState<ExpertCard[]>([]);
+  const [linkedInOutreach, setLinkedInOutreach] = useState<LinkedInOutreachItem[]>([]);
+  const [activeTab, setActiveTab] = useState<Tab>('experts');
   const [loading, setLoading] = useState(true);
-  const [error, setError] = useState<string | null>(null);
-  const [approvingDraft, setApprovingDraft] = useState<string | null>(null);
-  const [rejectingDraft, setRejectingDraft] = useState<string | null>(null);
-  const [bulkApproving, setBulkApproving] = useState(false);
-  const [sending, setSending] = useState(false);
-  const [successMessage, setSuccessMessage] = useState<string | null>(null);
-  const [expandedApproved, setExpandedApproved] = useState<string | null>(null);
-  const [editingDraft, setEditingDraft] = useState<string | null>(null);
-  const [editSubject, setEditSubject] = useState('');
-  const [editBody, setEditBody] = useState('');
-  const [saving, setSaving] = useState(false);
-
-  // Follow-up state
-  const [followupQueue, setFollowupQueue] = useState<FollowupQueueResponse | null>(null);
-  const [followupDrafts, setFollowupDrafts] = useState<FollowupDraftsResponse | null>(null);
-  const [generatingFollowups, setGeneratingFollowups] = useState(false);
-  const [sendingFollowups, setSendingFollowups] = useState(false);
-  const [expandedFollowup, setExpandedFollowup] = useState<string | null>(null);
-
-  // Refs for scrolling to sections
-  const candidatesRef = useRef<HTMLDivElement>(null);
-  const pendingReviewRef = useRef<HTMLDivElement>(null);
-  const approvedRef = useRef<HTMLDivElement>(null);
-  const sentRef = useRef<HTMLDivElement>(null);
-  const followupRef = useRef<HTMLDivElement>(null);
-
-  const scrollToSection = (ref: React.RefObject<HTMLDivElement | null>, expand?: () => void) => {
-    if (expand) expand();
-    setTimeout(() => {
-      ref.current?.scrollIntoView({ behavior: 'smooth', block: 'start' });
-    }, 100);
-  };
-
-  const loadData = useCallback(async () => {
-    if (!projectId) return;
-
-    try {
-      setLoading(true);
-      // Load essential data first
-      const [projectData, statusData, queueData, approvedData] = await Promise.all([
-        projectsApi.get(projectId),
-        projectsApi.getStatus(projectId),
-        projectsApi.getReviewQueue(projectId),
-        projectsApi.getApprovedDrafts(projectId),
-      ]);
-      setProject(projectData);
-      setStatus(statusData);
-      setReviewQueue(queueData);
-      setApprovedDrafts(approvedData);
-      setError(null);
-
-      // Load candidates separately (non-critical)
-      try {
-        const candidatesData = await projectsApi.getCandidates(projectId);
-        setCandidates(candidatesData);
-      } catch (candidatesErr) {
-        console.error('Failed to load candidates:', candidatesErr);
-        // Don't fail the whole page, just skip candidates
-      }
-
-      // Load follow-up data (non-critical)
-      try {
-        const [followupQueueData, followupDraftsData] = await Promise.all([
-          projectsApi.getFollowupQueue(projectId),
-          projectsApi.getFollowups(projectId),
-        ]);
-        setFollowupQueue(followupQueueData);
-        setFollowupDrafts(followupDraftsData);
-      } catch (followupErr) {
-        console.error('Failed to load follow-up data:', followupErr);
-      }
-    } catch (err) {
-      setError('Failed to load project data');
-      console.error(err);
-    } finally {
-      setLoading(false);
-    }
-  }, [projectId]);
+  const [sourcing, setSourcing] = useState(false);
+  const [generating, setGenerating] = useState(false);
+  const [generatingLinkedIn, setGeneratingLinkedIn] = useState(false);
 
   useEffect(() => {
+    if (!projectId) return;
     loadData();
-  }, [loadData]);
+  }, [projectId]);
 
-  const handleApproveDraft = async (draftId: string) => {
-    setApprovingDraft(draftId);
-    try {
-      await draftsApi.approve(draftId, 'reviewer');
-      setSuccessMessage('Draft approved successfully');
-      await loadData();
-    } catch (err) {
-      setError('Failed to approve draft');
-      console.error(err);
-    } finally {
-      setApprovingDraft(null);
-      setTimeout(() => setSuccessMessage(null), 3000);
-    }
-  };
-
-  const handleRejectDraft = async (draftId: string) => {
-    setRejectingDraft(draftId);
-    try {
-      await draftsApi.reject(draftId, 'reviewer');
-      setSuccessMessage('Draft rejected and removed');
-      await loadData();
-    } catch (err) {
-      setError('Failed to reject draft');
-      console.error(err);
-    } finally {
-      setRejectingDraft(null);
-      setTimeout(() => setSuccessMessage(null), 3000);
-    }
-  };
-
-  const handleBulkApprove = async () => {
+  const loadData = async () => {
     if (!projectId) return;
-    setBulkApproving(true);
+    setLoading(true);
     try {
-      const result = await projectsApi.bulkApprove(projectId, 'reviewer');
-      setSuccessMessage(`Approved ${result.approved_count} safe drafts`);
-      await loadData();
+      const [proj, cats, expertsData] = await Promise.all([
+        projectsApi.get(projectId),
+        expertNetworkApi.getCategories(projectId).catch(() => []),
+        expertNetworkApi.getExperts(projectId).catch(() => ({ experts: [] })),
+      ]);
+
+      setProject(proj);
+      setCategories(cats);
+      setAllExperts(expertsData.experts);
+
+      // Group experts by category
+      const grouped: Record<string, ExpertCard[]> = {};
+      for (const cat of cats) {
+        grouped[cat.id] = expertsData.experts.filter(e => e.category?.id === cat.id);
+      }
+      // Uncategorized
+      const uncategorized = expertsData.experts.filter(e => !e.category);
+      if (uncategorized.length > 0) {
+        grouped['uncategorized'] = uncategorized;
+      }
+      setExpertsByCategory(grouped);
     } catch (err) {
-      setError('Failed to bulk approve drafts');
       console.error(err);
-    } finally {
-      setBulkApproving(false);
-      setTimeout(() => setSuccessMessage(null), 3000);
     }
+    setLoading(false);
   };
 
-  const handleSendApproved = async () => {
+  const handleSourceAll = async () => {
     if (!projectId) return;
-    setSending(true);
+    setSourcing(true);
     try {
-      const result = await projectsApi.sendApproved(projectId, 'sender');
-      setSuccessMessage(`Enqueued ${result.jobs_enqueued} emails for sending`);
+      await expertNetworkApi.sourceAllCategories(projectId, 25);
       await loadData();
     } catch (err) {
-      setError('Failed to send emails');
       console.error(err);
-    } finally {
-      setSending(false);
-      setTimeout(() => setSuccessMessage(null), 3000);
     }
+    setSourcing(false);
   };
 
-  const handleStartEdit = (draftId: string, subject: string, body: string) => {
-    setEditingDraft(draftId);
-    setEditSubject(subject);
-    setEditBody(body);
-    setExpandedApproved(draftId);
-  };
-
-  const handleCancelEdit = () => {
-    setEditingDraft(null);
-    setEditSubject('');
-    setEditBody('');
-  };
-
-  const handleSaveEdit = async (draftId: string) => {
-    setSaving(true);
-    try {
-      await draftsApi.update(draftId, { subject: editSubject, body: editBody });
-      setSuccessMessage('Draft saved');
-      setEditingDraft(null);
-      await loadData();
-    } catch (err) {
-      setError('Failed to update draft');
-      console.error(err);
-    } finally {
-      setSaving(false);
-      setTimeout(() => setSuccessMessage(null), 3000);
-    }
-  };
-
-  const handleGenerateFollowups = async () => {
+  const handleGenerateProfiles = async () => {
     if (!projectId) return;
-    setGeneratingFollowups(true);
+    setGenerating(true);
     try {
-      const result = await projectsApi.generateFollowups(projectId);
-      setSuccessMessage(`Generated ${result.drafted} follow-up drafts`);
+      await expertNetworkApi.generateProfiles(projectId, 50);
       await loadData();
     } catch (err) {
-      setError('Failed to generate follow-ups');
       console.error(err);
-    } finally {
-      setGeneratingFollowups(false);
-      setTimeout(() => setSuccessMessage(null), 3000);
     }
+    setGenerating(false);
   };
 
-  const handleSendFollowups = async () => {
+  const handleGenerateLinkedIn = async () => {
     if (!projectId) return;
-    setSendingFollowups(true);
+    setGeneratingLinkedIn(true);
     try {
-      const result = await projectsApi.sendFollowups(projectId, 'user');
-      setSuccessMessage(`Queued ${result.jobs_enqueued} follow-up emails`);
-      await loadData();
+      await linkedInApi.generateOutreach(projectId, { min_relevance_score: 50, limit: 20 });
+      const status = await linkedInApi.getOutreachStatus(projectId);
+      setLinkedInOutreach(status.outreach);
+      setActiveTab('linkedin');
     } catch (err) {
-      setError('Failed to send follow-ups');
       console.error(err);
-    } finally {
-      setSendingFollowups(false);
-      setTimeout(() => setSuccessMessage(null), 3000);
+    }
+    setGeneratingLinkedIn(false);
+  };
+
+  const loadLinkedInStatus = async () => {
+    if (!projectId) return;
+    try {
+      const status = await linkedInApi.getOutreachStatus(projectId);
+      setLinkedInOutreach(status.outreach);
+    } catch (err) {
+      console.error(err);
     }
   };
 
-  const handleApproveFollowup = async (draftId: string) => {
-    setApprovingDraft(draftId);
-    try {
-      await draftsApi.approve(draftId, 'user');
-      setSuccessMessage('Follow-up approved');
-      await loadData();
-    } catch (err) {
-      setError('Failed to approve follow-up');
-      console.error(err);
-    } finally {
-      setApprovingDraft(null);
-      setTimeout(() => setSuccessMessage(null), 3000);
-    }
-  };
+  if (loading) return <div className="p-8 text-gray-500">Loading project...</div>;
+  if (!project) return <div className="p-8 text-red-500">Project not found</div>;
 
-  if (loading) {
-    return (
-      <div className="flex justify-center items-center h-64">
-        <div className="animate-spin rounded-full h-12 w-12 border-b-2 border-blue-600"></div>
-      </div>
-    );
-  }
-
-  if (error && !project) {
-    return (
-      <div className="bg-red-50 border border-red-200 rounded-lg p-4 text-red-700">
-        <p className="font-medium">Error</p>
-        <p>{error}</p>
-        <Link to="/" className="mt-2 text-sm underline hover:no-underline">
-          Back to Dashboard
-        </Link>
-      </div>
-    );
-  }
-
-  const safeCount = reviewQueue?.ready_to_approve.count || 0;
-  const needsReviewCount = reviewQueue?.needs_review.count || 0;
-  const approvedNotSent = (status?.pipeline.drafts_approved || 0) - (status?.pipeline.emails_sent || 0);
+  const tabs: { key: Tab; label: string }[] = [
+    { key: 'experts', label: `Experts by Category (${allExperts.length})` },
+    { key: 'all-experts', label: 'All Experts' },
+    { key: 'outreach', label: 'Email Outreach' },
+    { key: 'linkedin', label: 'LinkedIn Outreach' },
+  ];
 
   return (
-    <div>
-      {/* Breadcrumb */}
-      <nav className="mb-4">
-        <Link to="/" className="text-blue-600 hover:text-blue-800">
-          Dashboard
-        </Link>
-        <span className="mx-2 text-gray-400">/</span>
-        <span className="text-gray-600">{project?.name ? formatProjectName(project.name) : ''}</span>
+    <div className="min-h-screen bg-gray-50">
+      {/* Nav */}
+      <nav className="bg-slate-900 text-white">
+        <div className="max-w-7xl mx-auto px-6 py-3 flex items-center justify-between">
+          <div className="flex items-center gap-6">
+            <Link to="/" className="text-lg font-bold tracking-tight">myExpertNetwork</Link>
+          </div>
+          <span className="text-sm text-gray-300">ArcticBlue AI</span>
+        </div>
       </nav>
 
-      {/* Messages */}
-      {error && (
-        <div className="mb-4 bg-red-50 border border-red-200 rounded-lg p-4 text-red-700">
-          {error}
-          <button
-            onClick={() => setError(null)}
-            className="ml-2 text-sm underline"
-          >
-            Dismiss
-          </button>
-        </div>
-      )}
+      {/* Project Header */}
+      <div className="bg-white border-b">
+        <div className="max-w-7xl mx-auto px-6 py-6">
+          <Link to="/" className="text-sm text-blue-600 hover:text-blue-800 mb-2 inline-block">← All Projects</Link>
+          <h1 className="text-2xl font-bold text-gray-900">{project.name}</h1>
+          {project.industry && <p className="text-sm text-gray-500 mt-1">Industry: {project.industry}</p>}
 
-      {successMessage && (
-        <div className="mb-4 bg-green-50 border border-green-200 rounded-lg p-4 text-green-700">
-          {successMessage}
-        </div>
-      )}
-
-      {/* Header */}
-      <div className="mb-6">
-        <h1 className="text-2xl font-bold text-gray-900">{project?.name ? formatProjectName(project.name) : ''}</h1>
-        {project?.industry && (
-          <p className="text-gray-600 mt-1">
-            {project.industry}
-            {project.subvertical && ` - ${project.subvertical}`}
-          </p>
-        )}
-      </div>
-
-      {/* Pipeline Status */}
-      {status && (
-        <div className="mb-8">
-          <h2 className="text-lg font-semibold text-gray-900 mb-4">
-            Pipeline Status
-          </h2>
-          <div className="grid grid-cols-2 md:grid-cols-4 lg:grid-cols-5 gap-4">
-            <StatusCard
-              label="Candidates Scored"
-              value={status.pipeline.candidates_scored}
-              color="gray"
-              onClick={() => scrollToSection(candidatesRef, () => setShowCandidates(true))}
-            />
-            <StatusCard
-              label="Qualified"
-              value={status.pipeline.qualified_for_outreach}
-              color="blue"
-              onClick={() => scrollToSection(candidatesRef, () => setShowCandidates(true))}
-            />
-            <StatusCard
-              label="Drafts Created"
-              value={status.pipeline.drafts_created}
-              color="blue"
-              onClick={() => scrollToSection(pendingReviewRef)}
-            />
-            <StatusCard
-              label="Pending Review"
-              value={status.pipeline.drafts_pending_review}
-              color={status.pipeline.drafts_with_risk_flags > 0 ? 'yellow' : 'blue'}
-              subtext={
-                status.pipeline.drafts_with_risk_flags > 0
-                  ? `${status.pipeline.drafts_with_risk_flags} with risk flags`
-                  : undefined
-              }
-              onClick={() => scrollToSection(pendingReviewRef)}
-            />
-            <StatusCard
-              label="Approved"
-              value={status.pipeline.drafts_approved}
-              color="green"
-              onClick={() => scrollToSection(approvedRef)}
-            />
-            <StatusCard
-              label="Sent"
-              value={status.pipeline.emails_sent}
-              color="green"
-              onClick={() => scrollToSection(sentRef)}
-            />
-            <StatusCard
-              label="Replies"
-              value={status.pipeline.replies_received}
-              color={status.pipeline.interested > 0 ? 'green' : 'gray'}
-              subtext={
-                status.pipeline.interested > 0
-                  ? `${status.pipeline.interested} interested`
-                  : undefined
-              }
-            />
-          </div>
-
-          {/* Next Action */}
-          {status.next_action && (
-            <div className="mt-4 bg-blue-50 border border-blue-200 rounded-lg p-4 text-blue-800 text-sm">
-              <span className="font-medium">Next step:</span> {status.next_action}
-            </div>
-          )}
-        </div>
-      )}
-
-      {/* Candidates List */}
-      {candidates && candidates.total > 0 && (
-        <div className="mb-8" ref={candidatesRef}>
-          <button
-            onClick={() => setShowCandidates(!showCandidates)}
-            className="flex items-center justify-between w-full text-left"
-          >
-            <h2 className="text-lg font-semibold text-gray-900 flex items-center">
-              <span className="inline-flex items-center justify-center w-6 h-6 rounded-full bg-blue-100 text-blue-600 text-sm font-bold mr-2">
-                {candidates.total}
-              </span>
-              Scored Candidates
-            </h2>
-            <svg
-              className={`w-5 h-5 text-gray-500 transition-transform ${showCandidates ? 'rotate-180' : ''}`}
-              fill="none"
-              stroke="currentColor"
-              viewBox="0 0 24 24"
+          {/* Action buttons */}
+          <div className="flex flex-wrap items-center gap-3 mt-4">
+            <button
+              onClick={handleSourceAll}
+              disabled={sourcing || categories.length === 0}
+              className="px-4 py-2 bg-blue-600 text-white rounded-lg text-sm font-medium hover:bg-blue-700 disabled:opacity-50"
             >
-              <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M19 9l-7 7-7-7" />
-            </svg>
-          </button>
+              {sourcing ? 'Sourcing...' : 'Source Experts (All Categories)'}
+            </button>
+            <button
+              onClick={handleGenerateProfiles}
+              disabled={generating || allExperts.length === 0}
+              className="px-4 py-2 bg-indigo-600 text-white rounded-lg text-sm font-medium hover:bg-indigo-700 disabled:opacity-50"
+            >
+              {generating ? 'Generating...' : 'Generate AI Profiles'}
+            </button>
+            <button
+              onClick={handleGenerateLinkedIn}
+              disabled={generatingLinkedIn || allExperts.length === 0}
+              className="px-4 py-2 bg-slate-700 text-white rounded-lg text-sm font-medium hover:bg-slate-600 disabled:opacity-50"
+            >
+              {generatingLinkedIn ? 'Generating...' : 'Generate LinkedIn Outreach'}
+            </button>
+          </div>
 
-          {showCandidates && (
-            <div className="mt-4 bg-white rounded-lg shadow border border-gray-200 overflow-hidden">
-              <table className="min-w-full divide-y divide-gray-200">
-                <thead className="bg-gray-50">
-                  <tr>
-                    <th className="px-4 py-3 text-left text-xs font-medium text-gray-500 uppercase tracking-wider">Name</th>
-                    <th className="px-4 py-3 text-left text-xs font-medium text-gray-500 uppercase tracking-wider">Title</th>
-                    <th className="px-4 py-3 text-left text-xs font-medium text-gray-500 uppercase tracking-wider">Company</th>
-                    <th className="px-4 py-3 text-left text-xs font-medium text-gray-500 uppercase tracking-wider">Email</th>
-                    <th className="px-4 py-3 text-left text-xs font-medium text-gray-500 uppercase tracking-wider">Score</th>
-                  </tr>
-                </thead>
-                <tbody className="bg-white divide-y divide-gray-200">
-                  {candidates.candidates.map((candidate) => (
-                    <tr key={candidate.candidate_id} className={candidate.hard_pass ? 'bg-red-50' : ''}>
-                      <td className="px-4 py-3 whitespace-nowrap">
-                        <div className="text-sm font-medium text-gray-900">{candidate.full_name}</div>
-                        {candidate.linkedin_url && (
-                          <a
-                            href={candidate.linkedin_url}
-                            target="_blank"
-                            rel="noopener noreferrer"
-                            className="text-xs text-blue-600 hover:underline"
-                          >
-                            LinkedIn
-                          </a>
-                        )}
-                      </td>
-                      <td className="px-4 py-3 whitespace-nowrap text-sm text-gray-600">{candidate.title}</td>
-                      <td className="px-4 py-3 whitespace-nowrap text-sm text-gray-600">{candidate.company}</td>
-                      <td className="px-4 py-3 whitespace-nowrap text-sm">
-                        {candidate.email ? (
-                          <span className="text-gray-600">{candidate.email}</span>
-                        ) : (
-                          <span className="text-gray-400 italic">No email</span>
-                        )}
-                      </td>
-                      <td className="px-4 py-3 whitespace-nowrap">
-                        <span className={`inline-flex items-center px-2.5 py-0.5 rounded-full text-xs font-medium ${
-                          candidate.hard_pass
-                            ? 'bg-red-100 text-red-800'
-                            : candidate.score >= 60
-                            ? 'bg-green-100 text-green-800'
-                            : candidate.score >= 40
-                            ? 'bg-yellow-100 text-yellow-800'
-                            : 'bg-gray-100 text-gray-800'
-                        }`}>
-                          {candidate.score}
-                        </span>
-                      </td>
-                    </tr>
-                  ))}
-                </tbody>
-              </table>
-            </div>
-          )}
+          {/* Tabs */}
+          <div className="flex items-center gap-6 mt-6 border-b -mb-px">
+            {tabs.map((tab) => (
+              <button
+                key={tab.key}
+                onClick={() => {
+                  setActiveTab(tab.key);
+                  if (tab.key === 'linkedin') loadLinkedInStatus();
+                }}
+                className={`pb-3 text-sm font-medium border-b-2 transition-colors ${
+                  activeTab === tab.key
+                    ? 'border-blue-600 text-blue-600'
+                    : 'border-transparent text-gray-500 hover:text-gray-700'
+                }`}
+              >
+                {tab.label}
+              </button>
+            ))}
+          </div>
         </div>
-      )}
-
-      {/* Action Buttons */}
-      <div className="mb-6 flex flex-wrap gap-4">
-        {safeCount > 0 && (
-          <button
-            onClick={handleBulkApprove}
-            disabled={bulkApproving}
-            className={`inline-flex items-center px-4 py-2 border border-transparent text-sm font-medium rounded-md shadow-sm text-white ${
-              bulkApproving
-                ? 'bg-gray-400 cursor-not-allowed'
-                : 'bg-green-600 hover:bg-green-700'
-            }`}
-          >
-            {bulkApproving ? (
-              <>
-                <svg
-                  className="animate-spin -ml-1 mr-2 h-4 w-4 text-white"
-                  fill="none"
-                  viewBox="0 0 24 24"
-                >
-                  <circle
-                    className="opacity-25"
-                    cx="12"
-                    cy="12"
-                    r="10"
-                    stroke="currentColor"
-                    strokeWidth="4"
-                  />
-                  <path
-                    className="opacity-75"
-                    fill="currentColor"
-                    d="M4 12a8 8 0 018-8V0C5.373 0 0 5.373 0 12h4zm2 5.291A7.962 7.962 0 014 12H0c0 3.042 1.135 5.824 3 7.938l3-2.647z"
-                  />
-                </svg>
-                Approving...
-              </>
-            ) : (
-              `Bulk Approve ${safeCount} Safe Drafts`
-            )}
-          </button>
-        )}
-
-        {approvedNotSent > 0 && (
-          <button
-            onClick={handleSendApproved}
-            disabled={sending}
-            className={`inline-flex items-center px-4 py-2 border border-transparent text-sm font-medium rounded-md shadow-sm text-white ${
-              sending
-                ? 'bg-gray-400 cursor-not-allowed'
-                : 'bg-blue-600 hover:bg-blue-700'
-            }`}
-          >
-            {sending ? (
-              <>
-                <svg
-                  className="animate-spin -ml-1 mr-2 h-4 w-4 text-white"
-                  fill="none"
-                  viewBox="0 0 24 24"
-                >
-                  <circle
-                    className="opacity-25"
-                    cx="12"
-                    cy="12"
-                    r="10"
-                    stroke="currentColor"
-                    strokeWidth="4"
-                  />
-                  <path
-                    className="opacity-75"
-                    fill="currentColor"
-                    d="M4 12a8 8 0 018-8V0C5.373 0 0 5.373 0 12h4zm2 5.291A7.962 7.962 0 014 12H0c0 3.042 1.135 5.824 3 7.938l3-2.647z"
-                  />
-                </svg>
-                Sending...
-              </>
-            ) : (
-              `Send ${approvedNotSent} Approved Emails`
-            )}
-          </button>
-        )}
-
-        <button
-          onClick={loadData}
-          className="inline-flex items-center px-4 py-2 border border-gray-300 text-sm font-medium rounded-md shadow-sm text-gray-700 bg-white hover:bg-gray-50"
-        >
-          Refresh
-        </button>
       </div>
 
-      {/* Review Queue */}
-      {reviewQueue && reviewQueue.total_pending > 0 && (
-        <div className="space-y-8" ref={pendingReviewRef}>
-          {/* Needs Review Section */}
-          {needsReviewCount > 0 && (
-            <div>
-              <h2 className="text-lg font-semibold text-gray-900 mb-4 flex items-center">
-                <span className="inline-flex items-center justify-center w-6 h-6 rounded-full bg-orange-100 text-orange-600 text-sm font-bold mr-2">
-                  {needsReviewCount}
-                </span>
-                Drafts Needing Manual Review
-              </h2>
-              <p className="text-sm text-gray-600 mb-4">
-                These drafts have risk flags and require careful review before
-                approval.
-              </p>
-              <div className="space-y-4">
-                {reviewQueue.needs_review.drafts.map((draft) => (
-                  <DraftCard
-                    key={draft.draft_id}
-                    draft={draft}
-                    onApprove={handleApproveDraft}
-                    onReject={handleRejectDraft}
-                    onUpdate={loadData}
-                    isApproving={approvingDraft === draft.draft_id}
-                    isRejecting={rejectingDraft === draft.draft_id}
-                  />
-                ))}
+      {/* Tab Content */}
+      <div className="max-w-7xl mx-auto px-6 py-8">
+        {/* Experts by Category */}
+        {activeTab === 'experts' && (
+          <div>
+            {categories.length === 0 ? (
+              <div className="text-center py-16">
+                <p className="text-gray-400">No categories defined yet.</p>
+                <p className="text-gray-400 text-sm mt-1">Create the project from a requirements document to auto-generate categories.</p>
+              </div>
+            ) : (
+              categories.map((cat) => (
+                <CategorySection
+                  key={cat.id}
+                  category={cat}
+                  experts={expertsByCategory[cat.id] || []}
+                  projectId={projectId!}
+                />
+              ))
+            )}
+            {/* Uncategorized */}
+            {expertsByCategory['uncategorized']?.length > 0 && (
+              <CategorySection
+                category={{ id: 'uncategorized', name: 'Uncategorized', description: '', search_criteria: {}, expert_count: expertsByCategory['uncategorized'].length, sort_order: 999 }}
+                experts={expertsByCategory['uncategorized']}
+                projectId={projectId!}
+              />
+            )}
+          </div>
+        )}
+
+        {/* All Experts flat list */}
+        {activeTab === 'all-experts' && (
+          <div>
+            <div className="flex items-center justify-between mb-4">
+              <h2 className="text-lg font-semibold text-gray-900">{allExperts.length} Experts</h2>
+              <div className="flex items-center gap-2 text-sm text-gray-500">
+                <span>Sort by:</span>
+                <select className="border rounded px-2 py-1 text-sm">
+                  <option>Relevance Score</option>
+                  <option>Name</option>
+                  <option>Company</option>
+                </select>
               </div>
             </div>
-          )}
-
-          {/* Ready to Approve Section */}
-          {safeCount > 0 && (
-            <div>
-              <h2 className="text-lg font-semibold text-gray-900 mb-4 flex items-center">
-                <span className="inline-flex items-center justify-center w-6 h-6 rounded-full bg-green-100 text-green-600 text-sm font-bold mr-2">
-                  {safeCount}
-                </span>
-                Safe Drafts (No Risk Flags)
-              </h2>
-              <p className="text-sm text-gray-600 mb-4">
-                These drafts have no risk flags and can be bulk approved.
-              </p>
-              <div className="space-y-4">
-                {reviewQueue.ready_to_approve.drafts.map((draft) => (
-                  <DraftCard
-                    key={draft.draft_id}
-                    draft={draft}
-                    onApprove={handleApproveDraft}
-                    onReject={handleRejectDraft}
-                    onUpdate={loadData}
-                    isApproving={approvingDraft === draft.draft_id}
-                    isRejecting={rejectingDraft === draft.draft_id}
-                  />
-                ))}
-              </div>
-            </div>
-          )}
-        </div>
-      )}
-
-      {/* Empty State for Pending */}
-      {reviewQueue && reviewQueue.total_pending === 0 && !approvedDrafts?.approved.count && !approvedDrafts?.sent.count && (
-        <div className="bg-white rounded-lg shadow border border-gray-200 p-8 text-center">
-          <svg
-            className="mx-auto h-12 w-12 text-gray-400"
-            fill="none"
-            viewBox="0 0 24 24"
-            stroke="currentColor"
-          >
-            <path
-              strokeLinecap="round"
-              strokeLinejoin="round"
-              strokeWidth={2}
-              d="M9 12h6m-6 4h6m2 5H7a2 2 0 01-2-2V5a2 2 0 012-2h5.586a1 1 0 01.707.293l5.414 5.414a1 1 0 01.293.707V19a2 2 0 01-2 2z"
-            />
-          </svg>
-          <h3 className="mt-4 text-lg font-medium text-gray-900">
-            No drafts yet
-          </h3>
-          <p className="mt-2 text-sm text-gray-500">
-            Generate drafts for qualified candidates to get started.
-          </p>
-        </div>
-      )}
-
-      {/* Approved Drafts Section */}
-      {approvedDrafts && approvedDrafts.approved.count > 0 && (
-        <div className="mt-8" ref={approvedRef}>
-          <h2 className="text-lg font-semibold text-gray-900 mb-4 flex items-center">
-            <span className="inline-flex items-center justify-center w-6 h-6 rounded-full bg-green-100 text-green-600 text-sm font-bold mr-2">
-              {approvedDrafts.approved.count}
-            </span>
-            Approved (Ready to Send)
-          </h2>
-          <div className="bg-white rounded-lg shadow border border-green-200 divide-y divide-gray-100">
-            {approvedDrafts.approved.drafts.map((draft) => (
-              <div key={draft.draft_id} className="p-4">
-                <div className="flex items-center justify-between">
-                  <div className="flex-1">
-                    <p className="font-medium text-gray-900">{draft.candidate_name}</p>
-                    {draft.candidate_linkedin && (
-                      <a
-                        href={draft.candidate_linkedin}
-                        target="_blank"
-                        rel="noopener noreferrer"
-                        className="text-xs text-blue-600 hover:underline"
-                      >
-                        LinkedIn
+            <div className="space-y-3">
+              {allExperts.map((expert) => (
+                <div key={expert.id} className="bg-white border rounded-lg p-4 flex items-center justify-between">
+                  <div className="flex items-center gap-4">
+                    <div className="w-10 h-10 rounded-full bg-slate-700 flex items-center justify-center text-white font-semibold text-sm">
+                      {expert.full_name?.split(' ').map(n => n[0]).join('').slice(0, 2)}
+                    </div>
+                    <div>
+                      <Link to={`/projects/${projectId}/experts/${expert.id}`} className="text-sm font-semibold text-gray-900 hover:text-blue-600">
+                        {expert.full_name}
+                      </Link>
+                      <p className="text-xs text-gray-500">{expert.title} at {expert.company}</p>
+                    </div>
+                  </div>
+                  <div className="flex items-center gap-4">
+                    {expert.category && <span className="text-xs text-gray-400">{expert.category.name}</span>}
+                    <StatusBadge status={expert.status} />
+                    {expert.relevance_score != null && (
+                      <span className="text-sm font-semibold text-gray-600">{Math.round(expert.relevance_score)}%</span>
+                    )}
+                    {expert.linkedin_url && (
+                      <a href={expert.linkedin_url} target="_blank" rel="noopener noreferrer" className="text-blue-500 hover:text-blue-700">
+                        <svg className="w-4 h-4" viewBox="0 0 24 24" fill="currentColor"><path d="M19 0h-14c-2.761 0-5 2.239-5 5v14c0 2.761 2.239 5 5 5h14c2.762 0 5-2.239 5-5v-14c0-2.761-2.238-5-5-5zm-11 19h-3v-11h3v11zm-1.5-12.268c-.966 0-1.75-.79-1.75-1.764s.784-1.764 1.75-1.764 1.75.79 1.75 1.764-.783 1.764-1.75 1.764zm13.5 12.268h-3v-5.604c0-3.368-4-3.113-4 0v5.604h-3v-11h3v1.765c1.396-2.586 7-2.777 7 2.476v6.759z"/></svg>
                       </a>
                     )}
-                    <p className="text-sm text-gray-600">{draft.candidate_title} at {draft.candidate_company}</p>
-                    <p className="text-sm text-gray-500">{draft.candidate_email}</p>
-                  </div>
-                  <div className="flex items-center gap-2">
-                    <button
-                      onClick={() => setExpandedApproved(expandedApproved === draft.draft_id ? null : draft.draft_id)}
-                      className="text-gray-400 hover:text-gray-600"
-                    >
-                      <svg
-                        className={`h-5 w-5 transform transition-transform ${expandedApproved === draft.draft_id ? 'rotate-180' : ''}`}
-                        fill="none"
-                        viewBox="0 0 24 24"
-                        stroke="currentColor"
-                      >
-                        <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M19 9l-7 7-7-7" />
-                      </svg>
-                    </button>
-                    <span className="inline-flex items-center px-2.5 py-0.5 rounded-full text-xs font-medium bg-green-100 text-green-800">
-                      Approved
-                    </span>
                   </div>
                 </div>
-
-                {/* Subject - editable if in edit mode */}
-                {editingDraft === draft.draft_id ? (
-                  <div className="mt-2">
-                    <label className="text-sm font-medium text-gray-700">Subject:</label>
-                    <input
-                      type="text"
-                      value={editSubject}
-                      onChange={(e) => setEditSubject(e.target.value)}
-                      className="mt-1 block w-full rounded-md border border-gray-300 px-3 py-2 text-sm focus:border-blue-500 focus:ring-blue-500"
-                    />
-                  </div>
-                ) : (
-                  <p className="mt-2 text-sm text-gray-700">
-                    <span className="font-medium">Subject:</span> {draft.subject}
-                  </p>
-                )}
-
-                {/* Expanded content */}
-                {expandedApproved === draft.draft_id && (
-                  <div className="mt-4">
-                    {editingDraft === draft.draft_id ? (
-                      <div>
-                        <label className="text-sm font-medium text-gray-700">Email Body:</label>
-                        <textarea
-                          value={editBody}
-                          onChange={(e) => setEditBody(e.target.value)}
-                          rows={10}
-                          className="mt-1 block w-full rounded-md border border-gray-300 px-3 py-2 text-sm focus:border-blue-500 focus:ring-blue-500"
-                        />
-                        <div className="mt-3 flex gap-2">
-                          <button
-                            onClick={() => handleSaveEdit(draft.draft_id)}
-                            disabled={saving}
-                            className="inline-flex items-center px-3 py-1.5 border border-transparent text-sm font-medium rounded-md shadow-sm text-white bg-blue-600 hover:bg-blue-700 disabled:bg-gray-400"
-                          >
-                            {saving ? 'Saving...' : 'Save Changes'}
-                          </button>
-                          <button
-                            onClick={handleCancelEdit}
-                            className="inline-flex items-center px-3 py-1.5 border border-gray-300 text-sm font-medium rounded-md shadow-sm text-gray-700 bg-white hover:bg-gray-50"
-                          >
-                            Cancel
-                          </button>
-                        </div>
-                      </div>
-                    ) : (
-                      <div>
-                        <p className="text-sm font-medium text-gray-700 mb-2">Email Body:</p>
-                        <div className="bg-gray-50 rounded-lg p-4 text-sm text-gray-800 whitespace-pre-wrap border border-gray-200">
-                          {draft.body}
-                        </div>
-                        <button
-                          onClick={() => handleStartEdit(draft.draft_id, draft.subject, draft.body)}
-                          className="mt-3 inline-flex items-center px-3 py-1.5 border border-gray-300 text-sm font-medium rounded-md shadow-sm text-gray-700 bg-white hover:bg-gray-50"
-                        >
-                          Edit Draft
-                        </button>
-                      </div>
-                    )}
-                  </div>
-                )}
-              </div>
-            ))}
+              ))}
+            </div>
           </div>
-        </div>
-      )}
+        )}
 
-      {/* Sent Drafts Section */}
-      {approvedDrafts && approvedDrafts.sent.count > 0 && (
-        <div className="mt-8" ref={sentRef}>
-          <h2 className="text-lg font-semibold text-gray-900 mb-4 flex items-center">
-            <span className="inline-flex items-center justify-center w-6 h-6 rounded-full bg-blue-100 text-blue-600 text-sm font-bold mr-2">
-              {approvedDrafts.sent.count}
-            </span>
-            Sent
-          </h2>
-          <div className="bg-white rounded-lg shadow border border-blue-200 divide-y divide-gray-100">
-            {approvedDrafts.sent.drafts.map((draft) => (
-              <div key={draft.draft_id} className="p-4">
-                <div className="flex items-center justify-between">
-                  <div className="flex-1">
-                    <p className="font-medium text-gray-900">{draft.candidate_name}</p>
-                    {draft.candidate_linkedin && (
-                      <a
-                        href={draft.candidate_linkedin}
-                        target="_blank"
-                        rel="noopener noreferrer"
-                        className="text-xs text-blue-600 hover:underline"
-                      >
-                        LinkedIn
-                      </a>
-                    )}
-                    <p className="text-sm text-gray-600">{draft.candidate_title} at {draft.candidate_company}</p>
-                    <p className="text-sm text-gray-500">{draft.candidate_email}</p>
-                  </div>
-                  <div className="flex items-center gap-2">
-                    <button
-                      onClick={() => setExpandedApproved(expandedApproved === draft.draft_id ? null : draft.draft_id)}
-                      className="text-gray-400 hover:text-gray-600"
-                    >
-                      <svg
-                        className={`h-5 w-5 transform transition-transform ${expandedApproved === draft.draft_id ? 'rotate-180' : ''}`}
-                        fill="none"
-                        viewBox="0 0 24 24"
-                        stroke="currentColor"
-                      >
-                        <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M19 9l-7 7-7-7" />
-                      </svg>
-                    </button>
-                    <span className="inline-flex items-center px-2.5 py-0.5 rounded-full text-xs font-medium bg-blue-100 text-blue-800">
-                      Sent
-                    </span>
-                  </div>
-                </div>
-                <p className="mt-2 text-sm text-gray-700">
-                  <span className="font-medium">Subject:</span> {draft.subject}
-                </p>
-
-                {/* Expanded content - view only for sent */}
-                {expandedApproved === draft.draft_id && (
-                  <div className="mt-4">
-                    <p className="text-sm font-medium text-gray-700 mb-2">Email Body:</p>
-                    <div className="bg-gray-50 rounded-lg p-4 text-sm text-gray-800 whitespace-pre-wrap border border-gray-200">
-                      {draft.body}
-                    </div>
-                  </div>
-                )}
-              </div>
-            ))}
+        {/* Email Outreach (existing functionality link) */}
+        {activeTab === 'outreach' && (
+          <div className="text-center py-16">
+            <p className="text-gray-500">Email outreach uses the existing draft review workflow.</p>
+            <p className="text-gray-400 text-sm mt-2">Score candidates, generate drafts, review, and send via the API.</p>
           </div>
-        </div>
-      )}
+        )}
 
-      {/* Follow-up Section */}
-      {(followupQueue?.ready_for_followup.count || 0) > 0 || (followupDrafts?.pending.count || 0) > 0 || (followupDrafts?.approved.count || 0) > 0 || (followupDrafts?.sent.count || 0) > 0 ? (
-        <div className="mt-8" ref={followupRef}>
-          <h2 className="text-xl font-bold text-gray-900 mb-4 flex items-center">
-            <svg className="w-6 h-6 mr-2 text-purple-600" fill="none" viewBox="0 0 24 24" stroke="currentColor">
-              <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M3 8l7.89 5.26a2 2 0 002.22 0L21 8M5 19h14a2 2 0 002-2V7a2 2 0 00-2-2H5a2 2 0 00-2 2v10a2 2 0 002 2z" />
-            </svg>
-            Follow-ups
-          </h2>
-
-          {/* Ready for Follow-up */}
-          {followupQueue && followupQueue.ready_for_followup.count > 0 && !followupDrafts?.pending.count && (
-            <div className="bg-purple-50 border border-purple-200 rounded-lg p-4 mb-4">
-              <div className="flex items-center justify-between">
-                <div>
-                  <p className="font-medium text-purple-900">
-                    {followupQueue.ready_for_followup.count} candidates ready for follow-up
-                  </p>
-                  <p className="text-sm text-purple-700">
-                    These candidates were emailed 3+ days ago with no reply
-                  </p>
-                </div>
-                <button
-                  onClick={handleGenerateFollowups}
-                  disabled={generatingFollowups}
-                  className={`inline-flex items-center px-4 py-2 border border-transparent text-sm font-medium rounded-md shadow-sm text-white ${
-                    generatingFollowups
-                      ? 'bg-gray-400 cursor-not-allowed'
-                      : 'bg-purple-600 hover:bg-purple-700'
-                  }`}
-                >
-                  {generatingFollowups ? 'Generating...' : 'Generate Follow-up Drafts'}
-                </button>
-              </div>
+        {/* LinkedIn Outreach */}
+        {activeTab === 'linkedin' && (
+          <div>
+            <div className="flex items-center justify-between mb-6">
+              <h2 className="text-lg font-semibold text-gray-900">LinkedIn Outreach</h2>
+              <button
+                onClick={loadLinkedInStatus}
+                className="text-sm text-blue-600 hover:text-blue-800"
+              >
+                Refresh
+              </button>
             </div>
-          )}
 
-          {/* Pending Follow-up Drafts */}
-          {followupDrafts && followupDrafts.pending.count > 0 && (
-            <div className="mb-6">
-              <h3 className="text-lg font-semibold text-gray-900 mb-3 flex items-center">
-                <span className="inline-flex items-center justify-center w-6 h-6 rounded-full bg-orange-100 text-orange-600 text-sm font-bold mr-2">
-                  {followupDrafts.pending.count}
-                </span>
-                Pending Follow-up Review
-              </h3>
-              <div className="bg-white rounded-lg shadow border border-orange-200 divide-y divide-gray-100">
-                {followupDrafts.pending.drafts.map((draft) => (
-                  <div key={draft.draft_id} className="p-4">
-                    <div className="flex items-center justify-between">
-                      <div className="flex-1">
-                        <p className="font-medium text-gray-900">{draft.candidate_name}</p>
-                        {draft.candidate_linkedin && (
-                          <a href={draft.candidate_linkedin} target="_blank" rel="noopener noreferrer" className="text-xs text-blue-600 hover:underline">
-                            LinkedIn
-                          </a>
-                        )}
-                        <p className="text-sm text-gray-600">{draft.candidate_title} at {draft.candidate_company}</p>
-                      </div>
-                      <div className="flex items-center gap-2">
-                        <button
-                          onClick={() => setExpandedFollowup(expandedFollowup === draft.draft_id ? null : draft.draft_id)}
-                          className="text-gray-400 hover:text-gray-600"
-                        >
-                          <svg className={`h-5 w-5 transform transition-transform ${expandedFollowup === draft.draft_id ? 'rotate-180' : ''}`} fill="none" viewBox="0 0 24 24" stroke="currentColor">
-                            <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M19 9l-7 7-7-7" />
-                          </svg>
-                        </button>
-                        <button
-                          onClick={() => handleApproveFollowup(draft.draft_id)}
-                          disabled={approvingDraft === draft.draft_id}
-                          className={`inline-flex items-center px-3 py-1.5 border border-transparent text-sm font-medium rounded-md shadow-sm text-white ${
-                            approvingDraft === draft.draft_id
-                              ? 'bg-gray-400 cursor-not-allowed'
-                              : 'bg-green-600 hover:bg-green-700'
-                          }`}
-                        >
-                          {approvingDraft === draft.draft_id ? 'Approving...' : 'Approve'}
-                        </button>
-                      </div>
-                    </div>
-                    <p className="mt-2 text-sm text-gray-700">
-                      <span className="font-medium">Subject:</span> {draft.subject}
-                    </p>
-                    {expandedFollowup === draft.draft_id && (
-                      <div className="mt-4">
-                        <p className="text-sm font-medium text-gray-700 mb-2">Follow-up Body:</p>
-                        <div className="bg-gray-50 rounded-lg p-4 text-sm text-gray-800 whitespace-pre-wrap border border-gray-200">
-                          {draft.body}
+            {linkedInOutreach.length === 0 ? (
+              <div className="text-center py-16">
+                <p className="text-gray-400">No LinkedIn outreach generated yet.</p>
+                <p className="text-gray-400 text-sm mt-1">Click "Generate LinkedIn Outreach" above to create personalized connection notes.</p>
+              </div>
+            ) : (
+              <div className="space-y-3">
+                {linkedInOutreach.map((item) => (
+                  <div key={item.id} className="bg-white border rounded-lg p-4">
+                    <div className="flex items-start justify-between">
+                      <div>
+                        <p className="text-sm font-semibold text-gray-900">{item.full_name}</p>
+                        <p className="text-xs text-gray-500">{item.title} at {item.company}</p>
+                        <div className="mt-2 p-3 bg-gray-50 rounded text-xs text-gray-600">
+                          <p className="font-medium text-gray-700 mb-1">Connection Note:</p>
+                          <p>{item.connection_note}</p>
                         </div>
+                        <a href={item.linkedin_url} target="_blank" rel="noopener noreferrer" className="inline-flex items-center gap-1 mt-2 text-xs text-blue-600 hover:text-blue-800">
+                          <svg className="w-3 h-3" viewBox="0 0 24 24" fill="currentColor"><path d="M19 0h-14c-2.761 0-5 2.239-5 5v14c0 2.761 2.239 5 5 5h14c2.762 0 5-2.239 5-5v-14c0-2.761-2.238-5-5-5zm-11 19h-3v-11h3v11zm-1.5-12.268c-.966 0-1.75-.79-1.75-1.764s.784-1.764 1.75-1.764 1.75.79 1.75 1.764-.783 1.764-1.75 1.764zm13.5 12.268h-3v-5.604c0-3.368-4-3.113-4 0v5.604h-3v-11h3v1.765c1.396-2.586 7-2.777 7 2.476v6.759z"/></svg>
+                          View Profile
+                        </a>
                       </div>
-                    )}
-                  </div>
-                ))}
-              </div>
-            </div>
-          )}
-
-          {/* Approved Follow-ups Ready to Send */}
-          {followupDrafts && followupDrafts.approved.count > 0 && (
-            <div className="mb-6">
-              <div className="flex items-center justify-between mb-3">
-                <h3 className="text-lg font-semibold text-gray-900 flex items-center">
-                  <span className="inline-flex items-center justify-center w-6 h-6 rounded-full bg-green-100 text-green-600 text-sm font-bold mr-2">
-                    {followupDrafts.approved.count}
-                  </span>
-                  Approved Follow-ups (Ready to Send)
-                </h3>
-                <button
-                  onClick={handleSendFollowups}
-                  disabled={sendingFollowups}
-                  className={`inline-flex items-center px-4 py-2 border border-transparent text-sm font-medium rounded-md shadow-sm text-white ${
-                    sendingFollowups
-                      ? 'bg-gray-400 cursor-not-allowed'
-                      : 'bg-blue-600 hover:bg-blue-700'
-                  }`}
-                >
-                  {sendingFollowups ? 'Sending...' : `Send ${followupDrafts.approved.count} Follow-ups`}
-                </button>
-              </div>
-              <div className="bg-white rounded-lg shadow border border-green-200 divide-y divide-gray-100">
-                {followupDrafts.approved.drafts.map((draft) => (
-                  <div key={draft.draft_id} className="p-4">
-                    <div className="flex items-center justify-between">
-                      <div>
-                        <p className="font-medium text-gray-900">{draft.candidate_name}</p>
-                        <p className="text-sm text-gray-600">{draft.candidate_title} at {draft.candidate_company}</p>
+                      <div className="flex flex-col items-end gap-2">
+                        <StatusBadge status={item.status} />
+                        {item.sent_at && <span className="text-xs text-gray-400">Sent {new Date(item.sent_at).toLocaleDateString()}</span>}
+                        {item.error_message && <span className="text-xs text-red-500">{item.error_message}</span>}
                       </div>
-                      <span className="inline-flex items-center px-2.5 py-0.5 rounded-full text-xs font-medium bg-green-100 text-green-800">
-                        Ready
-                      </span>
                     </div>
-                    <p className="mt-2 text-sm text-gray-700">
-                      <span className="font-medium">Subject:</span> {draft.subject}
-                    </p>
                   </div>
                 ))}
               </div>
-            </div>
-          )}
-
-          {/* Sent Follow-ups */}
-          {followupDrafts && followupDrafts.sent.count > 0 && (
-            <div>
-              <h3 className="text-lg font-semibold text-gray-900 mb-3 flex items-center">
-                <span className="inline-flex items-center justify-center w-6 h-6 rounded-full bg-purple-100 text-purple-600 text-sm font-bold mr-2">
-                  {followupDrafts.sent.count}
-                </span>
-                Follow-ups Sent
-              </h3>
-              <div className="bg-white rounded-lg shadow border border-purple-200 divide-y divide-gray-100">
-                {followupDrafts.sent.drafts.map((draft) => (
-                  <div key={draft.draft_id} className="p-4">
-                    <div className="flex items-center justify-between">
-                      <div>
-                        <p className="font-medium text-gray-900">{draft.candidate_name}</p>
-                        <p className="text-sm text-gray-600">{draft.candidate_title} at {draft.candidate_company}</p>
-                      </div>
-                      <span className="inline-flex items-center px-2.5 py-0.5 rounded-full text-xs font-medium bg-purple-100 text-purple-800">
-                        Follow-up Sent
-                      </span>
-                    </div>
-                    <p className="mt-2 text-sm text-gray-700">
-                      <span className="font-medium">Subject:</span> {draft.subject}
-                    </p>
-                  </div>
-                ))}
-              </div>
-            </div>
-          )}
-        </div>
-      ) : null}
+            )}
+          </div>
+        )}
+      </div>
     </div>
   );
 }

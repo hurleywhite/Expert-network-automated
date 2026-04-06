@@ -1,3 +1,5 @@
+// ─── CORE TYPES ──────────────────────────────────────────────────────────────
+
 export interface Project {
   id: string;
   name: string;
@@ -28,6 +30,111 @@ export interface PipelineStatus {
   };
   next_action: string;
 }
+
+// ─── GLG-STYLE TYPES ────────────────────────────────────────────────────────
+
+export interface ProjectCategory {
+  id: string;
+  name: string;
+  description: string;
+  search_criteria: Record<string, any>;
+  expert_count: number;
+  sort_order: number;
+}
+
+export interface ScreenerQuestion {
+  id: string;
+  question_text: string;
+  question_type: 'multiple_choice' | 'free_text' | 'yes_no' | 'scale';
+  options: string[];
+  sort_order: number;
+}
+
+export interface ScreenerResponse {
+  answer: string;
+  confidence: 'high' | 'medium' | 'low';
+  reasoning: string;
+}
+
+export interface ExpertActivity {
+  id: string;
+  type: string;
+  description: string;
+  created_at: string;
+}
+
+export interface WorkExperienceEntry {
+  date_range: string;
+  title: string;
+  company: string;
+  is_current?: boolean;
+}
+
+export interface ExpertCard {
+  id: string;
+  candidate_id: string;
+  full_name: string;
+  title: string | null;
+  company: string | null;
+  region: string | null;
+  linkedin_url: string | null;
+  headline: string | null;
+  photo_url: string | null;
+  email: string | null;
+  rate_per_hour: number | null;
+  relevance_score: number | null;
+  status: string;
+  category: { id: string; name: string } | null;
+  ai_overview_snippet: string | null;
+  project_expertise: string[];
+  activity_count: number;
+}
+
+export interface ExpertProfileFull {
+  id: string;
+  candidate_id: string;
+  full_name: string;
+  title: string | null;
+  company: string | null;
+  region: string | null;
+  linkedin_url: string | null;
+  headline: string | null;
+  photo_url: string | null;
+  email: string | null;
+  rate_per_hour: number | null;
+  relevance_score: number | null;
+  status: string;
+  category: { id: string; name: string } | null;
+  ai_overview: string | null;
+  project_expertise: string[];
+  work_experience: WorkExperienceEntry[];
+  screener_responses: Record<string, ScreenerResponse>;
+  exa_research: Record<string, any>;
+  activities: ExpertActivity[];
+  linkedin_outreach: {
+    status: string;
+    connection_note: string | null;
+    sent_at: string | null;
+  } | null;
+  created_at: string;
+}
+
+export interface LinkedInOutreachItem {
+  id: string;
+  expert_id: string;
+  full_name: string;
+  title: string | null;
+  company: string | null;
+  linkedin_url: string;
+  connection_note: string;
+  follow_up_message: string;
+  status: string;
+  sent_at: string | null;
+  connected_at: string | null;
+  error_message: string | null;
+}
+
+// ─── EXISTING TYPES (kept for backward compat) ─────────────────────────────
 
 export interface Draft {
   draft_id: string;
@@ -100,14 +207,8 @@ export interface ApprovedDraft {
 
 export interface ApprovedDraftsResponse {
   project_id: string;
-  approved: {
-    count: number;
-    drafts: ApprovedDraft[];
-  };
-  sent: {
-    count: number;
-    drafts: ApprovedDraft[];
-  };
+  approved: { count: number; drafts: ApprovedDraft[] };
+  sent: { count: number; drafts: ApprovedDraft[] };
 }
 
 export interface ScoredCandidate {
@@ -129,7 +230,6 @@ export interface ProjectCandidatesResponse {
   candidates: ScoredCandidate[];
 }
 
-// Follow-up Types
 export interface FollowupCandidate {
   candidate_id: string;
   candidate_name: string;
@@ -145,10 +245,7 @@ export interface FollowupCandidate {
 
 export interface FollowupQueueResponse {
   project_id: string;
-  ready_for_followup: {
-    count: number;
-    candidates: FollowupCandidate[];
-  };
+  ready_for_followup: { count: number; candidates: FollowupCandidate[] };
 }
 
 export interface FollowupDraft {
@@ -170,21 +267,12 @@ export interface FollowupDraft {
 
 export interface FollowupDraftsResponse {
   project_id: string;
-  pending: {
-    count: number;
-    drafts: FollowupDraft[];
-  };
-  approved: {
-    count: number;
-    drafts: FollowupDraft[];
-  };
-  sent: {
-    count: number;
-    drafts: FollowupDraft[];
-  };
+  pending: { count: number; drafts: FollowupDraft[] };
+  approved: { count: number; drafts: FollowupDraft[] };
+  sent: { count: number; drafts: FollowupDraft[] };
 }
 
-// Interview Types
+// Interview types
 export type InterviewType = 'follow_up' | 'qualification' | 'deep_dive';
 export type InterviewStatus = 'scheduled' | 'in_progress' | 'completed' | 'cancelled' | 'failed';
 export type MessageType = 'ai_question' | 'human_response' | 'system';
@@ -211,12 +299,7 @@ export interface InterviewSession {
   meet_link?: string;
   summary?: string;
   qualification_score?: number;
-  candidate?: {
-    full_name: string;
-    title: string;
-    company: string;
-    email: string;
-  };
+  candidate?: { full_name: string; title: string; company: string; email: string };
   template?: InterviewTemplate;
 }
 
@@ -249,19 +332,11 @@ export interface HumanResponseRequest {
 export interface InterviewStartResponse {
   session_id: string;
   status: string;
-  opening_message: {
-    id: string;
-    text: string;
-    audio_url?: string;
-  };
+  opening_message: { id: string; text: string; audio_url?: string };
   meet_link: string;
 }
 
 export interface InterviewResponseResult {
-  ai_response: {
-    id?: string;
-    text?: string;
-    audio_url?: string;
-  };
+  ai_response: { id?: string; text?: string; audio_url?: string };
   session_status: string;
 }

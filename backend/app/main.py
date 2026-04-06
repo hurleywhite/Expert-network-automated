@@ -6,6 +6,7 @@ from rq.registry import FailedJobRegistry, FinishedJobRegistry
 
 from app.deps import verify_api_key
 from app.routers import projects, candidates, drafts, webhooks, sourcing, interviews
+from app.routers import expert_profiles, linkedin
 from app.workers.queue import redis_conn, default_queue
 
 app = FastAPI(
@@ -30,6 +31,8 @@ app.include_router(drafts.router)
 app.include_router(webhooks.router)
 app.include_router(sourcing.router)
 app.include_router(interviews.router, prefix="/interviews", tags=["interviews"])
+app.include_router(expert_profiles.router)
+app.include_router(linkedin.router)
 
 
 @app.get("/")

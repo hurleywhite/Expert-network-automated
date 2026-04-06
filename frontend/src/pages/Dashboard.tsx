@@ -1,164 +1,134 @@
 import { useState, useEffect } from 'react';
 import { Link } from 'react-router-dom';
-import { projectsApi } from '../api/client';
-import type { Project, PipelineStatus } from '../types';
-
-interface ProjectWithStatus extends Project {
-  status?: PipelineStatus;
-}
-
-// Clean up project names for display
-function formatProjectName(name: string): string {
-  // Remove "Find" prefix
-  let cleaned = name.replace(/^Find\s+/i, '');
-  // Capitalize first letter
-  cleaned = cleaned.charAt(0).toUpperCase() + cleaned.slice(1);
-  return cleaned;
-}
+import { projectsApi, expertNetworkApi } from '../api/client';
+import type { Project } from '../types';
 
 export default function Dashboard() {
-  const [projects, setProjects] = useState<ProjectWithStatus[]>([]);
+  const [projects, setProjects] = useState<Project[]>([]);
   const [loading, setLoading] = useState(true);
-  const [error, setError] = useState<string | null>(null);
+  const [showCreate, setShowCreate] = useState(false);
+  const [docText, setDocText] = useState('');
+  const [creating, setCreating] = useState(false);
 
   useEffect(() => {
-    loadProjects();
+    projectsApi.list().then((data) => {
+      setProjects(data);
+      setLoading(false);
+    }).catch(() => setLoading(false));
   }, []);
 
-  const loadProjects = async () => {
+  const handleCreateFromDoc = async () => {
+    if (!docText.trim()) return;
+    setCreating(true);
     try {
-      setLoading(true);
-      const projectList = await projectsApi.list();
-
-      // Load status for each project
-      const projectsWithStatus = await Promise.all(
-        projectList.map(async (project) => {
-          try {
-            const status = await projectsApi.getStatus(project.id);
-            return { ...project, status };
-          } catch {
-            return project;
-          }
-        })
-      );
-
-      setProjects(projectsWithStatus);
-      setError(null);
+      await expertNetworkApi.createFromDocument(docText);
+      const updated = await projectsApi.list();
+      setProjects(updated);
+      setShowCreate(false);
+      setDocText('');
     } catch (err) {
-      setError('Failed to load projects. Is the backend running?');
-      console.error(err);
-    } finally {
-      setLoading(false);
+      console.error('Failed to create project:', err);
     }
+    setCreating(false);
   };
 
-  if (loading) {
-    return (
-      <div className="flex justify-center items-center h-64">
-        <div className="animate-spin rounded-full h-12 w-12 border-b-2 border-blue-600"></div>
-      </div>
-    );
-  }
-
-  if (error) {
-    return (
-      <div className="bg-red-50 border border-red-200 rounded-lg p-4 text-red-700">
-        <p className="font-medium">Error</p>
-        <p>{error}</p>
-        <button
-          onClick={loadProjects}
-          className="mt-2 text-sm underline hover:no-underline"
-        >
-          Retry
-        </button>
-      </div>
-    );
-  }
-
   return (
-    <div>
-      <div className="mb-6">
-        <h1 className="text-2xl font-bold text-gray-900">Projects</h1>
-        <p className="text-gray-600 mt-1">
-          Select a project to review and approve outreach drafts
-        </p>
+    <div className="min-h-screen bg-gray-50">
+      {/* Nav Header */}
+      <nav className="bg-slate-900 text-white">
+        <div className="max-w-7xl mx-auto px-6 py-3 flex items-center justify-between">
+          <div className="flex items-center gap-6">
+            <span className="text-lg font-bold tracking-tight">myExpertNetwork</span>
+            <div className="flex items-center gap-4 text-sm">
+              <span className="text-white font-medium border-b-2 border-white pb-1">My Projects</span>
+              <span className="text-gray-400 hover:text-white cursor-pointer">Events & Library</span>
+            </div>
+          </div>
+          <div className="flex items-center gap-4 text-sm">
+            <span className="text-gray-300">ArcticBlue AI</span>
+          </div>
+        </div>
+      </nav>
+
+      {/* Content */}
+      <div className="max-w-7xl mx-auto px-6 py-8">
+        <div className="flex items-center justify-between mb-8">
+          <h1 className="text-2xl font-bold text-gray-900">Projects</h1>
+          <button
+            onClick={() => setShowCreate(!showCreate)}
+            className="px-4 py-2 bg-slate-800 text-white rounded-lg text-sm font-medium hover:bg-slate-700"
+          >
+            + New Project from Document
+          </button>
+        </div>
+
+        {/* Create from Document Form */}
+        {showCreate && (
+          <div className="bg-white border rounded-lg p-6 mb-8">
+            <h2 className="text-lg font-semibold mb-4">Create Project from Requirements Document</h2>
+            <p className="text-sm text-gray-500 mb-4">
+              Paste your project requirements, research brief, or expert sourcing criteria below.
+              AI will extract categories, screener questions, and search criteria automatically.
+            </p>
+            <textarea
+              value={docText}
+              onChange={(e) => setDocText(e.target.value)}
+              placeholder="Paste your requirements document here..."
+              className="w-full h-48 border rounded-lg p-4 text-sm focus:ring-2 focus:ring-blue-500 focus:border-blue-500"
+            />
+            <div className="flex justify-end gap-3 mt-4">
+              <button
+                onClick={() => { setShowCreate(false); setDocText(''); }}
+                className="px-4 py-2 text-sm text-gray-600 hover:text-gray-800"
+              >
+                Cancel
+              </button>
+              <button
+                onClick={handleCreateFromDoc}
+                disabled={creating || !docText.trim()}
+                className="px-4 py-2 bg-blue-600 text-white rounded-lg text-sm font-medium hover:bg-blue-700 disabled:opacity-50"
+              >
+                {creating ? 'Creating...' : 'Create Project'}
+              </button>
+            </div>
+          </div>
+        )}
+
+        {/* Project List */}
+        {loading ? (
+          <p className="text-gray-500">Loading projects...</p>
+        ) : projects.length === 0 ? (
+          <div className="text-center py-16">
+            <p className="text-gray-400 text-lg">No projects yet.</p>
+            <p className="text-gray-400 text-sm mt-2">Create one from a requirements document to get started.</p>
+          </div>
+        ) : (
+          <div className="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-3 gap-4">
+            {projects.map((project) => (
+              <Link
+                key={project.id}
+                to={`/projects/${project.id}`}
+                className="bg-white border rounded-lg p-5 hover:shadow-md transition-shadow"
+              >
+                <h3 className="text-base font-semibold text-gray-900 mb-2">{project.name}</h3>
+                <div className="text-xs text-gray-500 space-y-1">
+                  {project.industry && <p>Industry: {project.industry}</p>}
+                  {project.keywords?.length > 0 && (
+                    <div className="flex flex-wrap gap-1 mt-2">
+                      {project.keywords.slice(0, 5).map((kw) => (
+                        <span key={kw} className="bg-gray-100 text-gray-600 px-2 py-0.5 rounded text-xs">{kw}</span>
+                      ))}
+                    </div>
+                  )}
+                  <p className="text-gray-400 mt-2">
+                    Created {new Date(project.created_at).toLocaleDateString()}
+                  </p>
+                </div>
+              </Link>
+            ))}
+          </div>
+        )}
       </div>
-
-      {projects.length === 0 ? (
-        <div className="bg-white rounded-lg shadow border border-gray-200 p-8 text-center">
-          <p className="text-gray-500">No projects found</p>
-          <p className="text-sm text-gray-400 mt-2">
-            Create a project using the API to get started
-          </p>
-        </div>
-      ) : (
-        <div className="grid gap-4 md:grid-cols-2 lg:grid-cols-3">
-          {projects.map((project) => (
-            <Link
-              key={project.id}
-              to={`/projects/${project.id}`}
-              className="block bg-white rounded-lg shadow border border-gray-200 p-5 hover:shadow-md transition-shadow"
-            >
-              <h2 className="text-lg font-semibold text-gray-900">
-                {formatProjectName(project.name)}
-              </h2>
-
-              {project.industry && (
-                <p className="text-sm text-gray-500 mt-1">
-                  {project.industry}
-                  {project.subvertical && ` - ${project.subvertical}`}
-                </p>
-              )}
-
-              {project.status && (
-                <div className="mt-4 grid grid-cols-3 gap-2 text-center">
-                  <div className="bg-gray-50 rounded p-2">
-                    <p className="text-lg font-bold text-gray-900">
-                      {project.status.pipeline.drafts_pending_review}
-                    </p>
-                    <p className="text-xs text-gray-500">Pending</p>
-                  </div>
-                  <div className="bg-green-50 rounded p-2">
-                    <p className="text-lg font-bold text-green-700">
-                      {project.status.pipeline.drafts_approved}
-                    </p>
-                    <p className="text-xs text-gray-500">Approved</p>
-                  </div>
-                  <div className="bg-blue-50 rounded p-2">
-                    <p className="text-lg font-bold text-blue-700">
-                      {project.status.pipeline.emails_sent}
-                    </p>
-                    <p className="text-xs text-gray-500">Sent</p>
-                  </div>
-                </div>
-              )}
-
-              {project.status && project.status.pipeline.drafts_with_risk_flags > 0 && (
-                <div className="mt-3 flex items-center text-orange-600 text-sm">
-                  <svg
-                    className="h-4 w-4 mr-1"
-                    fill="none"
-                    viewBox="0 0 24 24"
-                    stroke="currentColor"
-                  >
-                    <path
-                      strokeLinecap="round"
-                      strokeLinejoin="round"
-                      strokeWidth={2}
-                      d="M12 9v2m0 4h.01m-6.938 4h13.856c1.54 0 2.502-1.667 1.732-3L13.732 4c-.77-1.333-2.694-1.333-3.464 0L3.34 16c-.77 1.333.192 3 1.732 3z"
-                    />
-                  </svg>
-                  {project.status.pipeline.drafts_with_risk_flags} drafts need manual review
-                </div>
-              )}
-
-              <div className="mt-4 text-sm text-blue-600 font-medium">
-                View Details &rarr;
-              </div>
-            </Link>
-          ))}
-        </div>
-      )}
     </div>
   );
 }

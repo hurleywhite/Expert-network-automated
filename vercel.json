@@ -1,0 +1,15 @@
+{
+  "buildCommand": "cd frontend && npm install && npx vite build",
+  "outputDirectory": "frontend/dist",
+  "framework": null,
+  "installCommand": "cd frontend && npm install",
+  "functions": {
+    "api/**/*.ts": {
+      "maxDuration": 60
+    }
+  },
+  "rewrites": [
+    { "source": "/api/(.*)", "destination": "/api/$1" },
+    { "source": "/(.*)", "destination": "/index.html" }
+  ]
+}

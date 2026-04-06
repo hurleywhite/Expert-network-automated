@@ -10,6 +10,7 @@ from sqlalchemy import (
     Float,
     ForeignKey,
     Integer,
+    Numeric,
     String,
     Text,
     UniqueConstraint,
@@ -74,6 +75,42 @@ class MessageDirection(str, PyEnum):
     OUTBOUND = "outbound"
 
 
+class ExpertProfileStatus(str, PyEnum):
+    SOURCED = "sourced"
+    SCREENED = "screened"
+    SHORTLISTED = "shortlisted"
+    SCHEDULED = "scheduled"
+    COMPLETED = "completed"
+    REJECTED = "rejected"
+
+
+class ExpertActivityType(str, PyEnum):
+    ADDED = "added"
+    CALL_REQUESTED = "call_requested"
+    CALL_SCHEDULED = "call_scheduled"
+    CALL_COMPLETED = "call_completed"
+    EMAIL_SENT = "email_sent"
+    REPLY_RECEIVED = "reply_received"
+    LINKEDIN_SENT = "linkedin_sent"
+    LINKEDIN_CONNECTED = "linkedin_connected"
+
+
+class ScreenerQuestionType(str, PyEnum):
+    MULTIPLE_CHOICE = "multiple_choice"
+    FREE_TEXT = "free_text"
+    YES_NO = "yes_no"
+    SCALE = "scale"
+
+
+class LinkedInOutreachStatus(str, PyEnum):
+    PENDING = "pending"
+    CONNECTION_SENT = "connection_sent"
+    CONNECTED = "connected"
+    MESSAGE_SENT = "message_sent"
+    REPLIED = "replied"
+    FAILED = "failed"
+
+
 # Models
 class ProjectBrief(Base):
     __tablename__ = "project_briefs"
@@ -106,6 +143,8 @@ class Candidate(Base):
     company_employee_count = Column(Integer)
     region = Column(String)
     linkedin_url = Column(String)
+    headline = Column(String)
+    photo_url = Column(String)
     email = Column(String)
     email_verified = Column(Boolean, default=False)
     status = Column(
@@ -455,3 +494,120 @@ class InterviewMessage(Base):
     )
 
     session = relationship("InterviewSession", back_populates="messages")
+
+
+# ─── GLG-STYLE MODELS ────────────────────────────────────────────────────────
+
+
+class ProjectCategory(Base):
+    """Expert categories within a project (e.g., 'Systems Integrators', 'DB Product Leaders')."""
+    __tablename__ = "project_categories"
+
+    id = Column(UUID(as_uuid=True), primary_key=True, default=uuid.uuid4)
+    project_id = Column(UUID(as_uuid=True), ForeignKey("project_briefs.id"), nullable=False)
+    name = Column(String, nullable=False)
+    description = Column(Text)
+    search_criteria = Column(JSON, default=dict)
+    sort_order = Column(Integer, default=0)
+    created_at = Column(DateTime, default=datetime.utcnow, nullable=False)
+
+    project = relationship("ProjectBrief", backref="categories")
+    expert_profiles = relationship("ExpertProfile", back_populates="category")
+
+
+class ScreenerQuestion(Base):
+    """Screening questions auto-generated from project requirements."""
+    __tablename__ = "screener_questions"
+
+    id = Column(UUID(as_uuid=True), primary_key=True, default=uuid.uuid4)
+    project_id = Column(UUID(as_uuid=True), ForeignKey("project_briefs.id"), nullable=False)
+    question_text = Column(Text, nullable=False)
+    question_type = Column(
+        Enum(ScreenerQuestionType, name="screenerquestiontype", create_type=True,
+             values_callable=lambda x: [e.value for e in x]),
+        nullable=False,
+    )
+    options = Column(JSON, default=list)
+    sort_order = Column(Integer, default=0)
+    created_at = Column(DateTime, default=datetime.utcnow, nullable=False)
+
+    project = relationship("ProjectBrief", backref="screener_questions")
+
+
+class ExpertProfile(Base):
+    """Rich AI-generated expert profile for a candidate within a project."""
+    __tablename__ = "expert_profiles"
+
+    id = Column(UUID(as_uuid=True), primary_key=True, default=uuid.uuid4)
+    candidate_id = Column(UUID(as_uuid=True), ForeignKey("candidates.id"), nullable=False)
+    project_id = Column(UUID(as_uuid=True), ForeignKey("project_briefs.id"), nullable=False)
+    category_id = Column(UUID(as_uuid=True), ForeignKey("project_categories.id"), nullable=True)
+
+    ai_overview = Column(Text)
+    project_expertise = Column(JSON, default=list)
+    relevance_score = Column(Float)
+    rate_per_hour = Column(Numeric(10, 2))
+    exa_research = Column(JSON, default=dict)
+    screener_responses = Column(JSON, default=dict)
+    work_experience = Column(JSON, default=list)
+
+    status = Column(
+        Enum(ExpertProfileStatus, name="expertprofilestatus", create_type=True,
+             values_callable=lambda x: [e.value for e in x]),
+        default=ExpertProfileStatus.SOURCED,
+        nullable=False,
+    )
+    created_at = Column(DateTime, default=datetime.utcnow, nullable=False)
+    updated_at = Column(DateTime, default=datetime.utcnow, onupdate=datetime.utcnow)
+
+    __table_args__ = (
+        Index("ix_expert_profile_candidate_project", "candidate_id", "project_id"),
+        Index("ix_expert_profile_category", "category_id"),
+    )
+
+    candidate = relationship("Candidate", backref="expert_profiles")
+    project = relationship("ProjectBrief", backref="expert_profiles")
+    category = relationship("ProjectCategory", back_populates="expert_profiles")
+    activities = relationship("ExpertActivity", back_populates="expert_profile", order_by="ExpertActivity.created_at.desc()")
+    linkedin_outreach = relationship("LinkedInOutreach", back_populates="expert_profile", uselist=False)
+
+
+class ExpertActivity(Base):
+    """Activity log entries for expert profiles."""
+    __tablename__ = "expert_activities"
+
+    id = Column(UUID(as_uuid=True), primary_key=True, default=uuid.uuid4)
+    expert_profile_id = Column(UUID(as_uuid=True), ForeignKey("expert_profiles.id"), nullable=False)
+    activity_type = Column(
+        Enum(ExpertActivityType, name="expertactivitytype", create_type=True,
+             values_callable=lambda x: [e.value for e in x]),
+        nullable=False,
+    )
+    description = Column(Text)
+    created_at = Column(DateTime, default=datetime.utcnow, nullable=False)
+
+    expert_profile = relationship("ExpertProfile", back_populates="activities")
+
+
+class LinkedInOutreach(Base):
+    """Tracks automated LinkedIn outreach per expert."""
+    __tablename__ = "linkedin_outreach"
+
+    id = Column(UUID(as_uuid=True), primary_key=True, default=uuid.uuid4)
+    expert_profile_id = Column(UUID(as_uuid=True), ForeignKey("expert_profiles.id"), nullable=False)
+    linkedin_url = Column(String, nullable=False)
+    connection_note = Column(String(300))
+    follow_up_message = Column(Text)
+    status = Column(
+        Enum(LinkedInOutreachStatus, name="linkedinoutreachstatus", create_type=True,
+             values_callable=lambda x: [e.value for e in x]),
+        default=LinkedInOutreachStatus.PENDING,
+        nullable=False,
+    )
+    sent_at = Column(DateTime)
+    connected_at = Column(DateTime)
+    replied_at = Column(DateTime)
+    error_message = Column(Text)
+    created_at = Column(DateTime, default=datetime.utcnow, nullable=False)
+
+    expert_profile = relationship("ExpertProfile", back_populates="linkedin_outreach")

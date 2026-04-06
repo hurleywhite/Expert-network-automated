@@ -624,3 +624,137 @@ def import_candidates_from_project_brief(
 
     # Delegate to main import endpoint logic
     return import_candidates_for_project(project_id, import_request, db)
+
+
+# ─── CATEGORY-AWARE SOURCING (GLG-STYLE) ─────────────────────────────────────
+
+
+@router.post("/import/{project_id}/from-category/{category_id}")
+def import_candidates_from_category(
+    project_id: UUID,
+    category_id: str,
+    max_results: int = 50,
+    require_email: bool = True,
+    db: Session = Depends(get_db),
+):
+    """
+    Import candidates based on a project category's search criteria.
+    Also auto-creates ExpertProfile records linked to the category.
+    """
+    from app.models import ProjectCategory, ExpertProfile, ExpertProfileStatus, ExpertActivity, ExpertActivityType
+    import uuid as uuid_mod
+    from datetime import datetime
+
+    # Get category
+    category = db.query(ProjectCategory).filter(ProjectCategory.id == category_id).first()
+    if not category:
+        raise HTTPException(status_code=404, detail="Category not found")
+
+    sc = category.search_criteria or {}
+
+    criteria = SourcingSearchCriteria(
+        titles=sc.get("titles", []),
+        seniorities=sc.get("seniorities", []),
+        keywords=sc.get("keywords", []),
+        industries=sc.get("industries", []),
+        locations=sc.get("locations", []),
+        company_sizes=sc.get("company_sizes", []),
+        organization_keywords=sc.get("organization_keywords", []),
+    )
+
+    import_request = SourcingImportRequest(
+        criteria=criteria,
+        max_results=max_results,
+        require_email=require_email,
+    )
+
+    # Import candidates
+    result = import_candidates_for_project(project_id, import_request, db)
+
+    # Create ExpertProfile for each imported candidate
+    profiles_created = 0
+    for candidate_resp in result.candidates:
+        # Check if profile already exists
+        existing = (
+            db.query(ExpertProfile)
+            .filter(
+                ExpertProfile.candidate_id == candidate_resp.id,
+                ExpertProfile.project_id == project_id,
+            )
+            .first()
+        )
+        if existing:
+            continue
+
+        profile = ExpertProfile(
+            id=uuid_mod.uuid4(),
+            candidate_id=candidate_resp.id,
+            project_id=project_id,
+            category_id=uuid_mod.UUID(category_id),
+            status=ExpertProfileStatus.SOURCED,
+            created_at=datetime.utcnow(),
+        )
+        db.add(profile)
+
+        activity = ExpertActivity(
+            id=uuid_mod.uuid4(),
+            expert_profile_id=profile.id,
+            activity_type=ExpertActivityType.ADDED,
+            description=f"Sourced via Apollo for category: {category.name}",
+            created_at=datetime.utcnow(),
+        )
+        db.add(activity)
+        profiles_created += 1
+
+    db.commit()
+
+    return {
+        "project_id": str(project_id),
+        "category_id": category_id,
+        "category_name": category.name,
+        "candidates_found": result.candidates_found,
+        "candidates_imported": result.candidates_imported,
+        "expert_profiles_created": profiles_created,
+    }
+
+
+@router.post("/import/{project_id}/all-categories")
+def import_from_all_categories(
+    project_id: UUID,
+    max_per_category: int = 25,
+    db: Session = Depends(get_db),
+):
+    """Source experts for every category in a project."""
+    from app.models import ProjectCategory
+
+    categories = (
+        db.query(ProjectCategory)
+        .filter(ProjectCategory.project_id == str(project_id))
+        .all()
+    )
+
+    if not categories:
+        raise HTTPException(status_code=404, detail="No categories found. Create project from document first.")
+
+    results = []
+    for cat in categories:
+        try:
+            result = import_candidates_from_category(
+                project_id=project_id,
+                category_id=str(cat.id),
+                max_results=max_per_category,
+                db=db,
+            )
+            results.append(result)
+        except Exception as e:
+            results.append({
+                "category_id": str(cat.id),
+                "category_name": cat.name,
+                "error": str(e),
+            })
+
+    return {
+        "project_id": str(project_id),
+        "categories_processed": len(results),
+        "results": results,
+    }
