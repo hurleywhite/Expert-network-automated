@@ -403,4 +403,49 @@ export const draftsApi = {
   },
 };
 
+// ─── OUTREACH CAMPAIGNS API ─────────────────────────────────────────────────
+
+export const outreachApi = {
+  // List campaigns for a project (Supabase direct)
+  listCampaigns: async (projectId: string): Promise<any[]> => {
+    const { data, error } = await supabase
+      .from('outreach_campaigns')
+      .select('*')
+      .eq('project_id', projectId)
+      .order('created_at', { ascending: false });
+    if (error) throw error;
+    return data || [];
+  },
+
+  // Create a new AI-generated outreach campaign (Vercel serverless → Claude)
+  createCampaign: async (projectId: string, options?: {
+    campaign_name?: string;
+    min_relevance_score?: number;
+    limit?: number;
+    sender_name?: string;
+    sender_title?: string;
+    consultation_rate?: string;
+    call_duration?: string;
+    context_override?: string;
+  }): Promise<any> => {
+    return apiCall('/api/outreach/create-campaign', {
+      method: 'POST',
+      body: JSON.stringify({ project_id: projectId, ...options }),
+    });
+  },
+
+  // Get campaign detail + leads (Vercel serverless)
+  getCampaignDetail: async (campaignId: string): Promise<any> => {
+    return apiCall(`/api/outreach/export?campaign_id=${campaignId}`, { method: 'GET' });
+  },
+
+  // Push to HeyReach (Vercel serverless)
+  pushToHeyReach: async (campaignId: string, linkedinAccountId?: string): Promise<any> => {
+    return apiCall('/api/outreach/push-to-heyreach', {
+      method: 'POST',
+      body: JSON.stringify({ campaign_id: campaignId, linkedin_account_id: linkedinAccountId }),
+    });
+  },
+};
+
 export default supabase;

@@ -134,6 +134,64 @@ export interface LinkedInOutreachItem {
   error_message: string | null;
 }
 
+// ─── OUTREACH CAMPAIGN TYPES ────────────────────────────────────────────────
+
+export interface OutreachCampaign {
+  id: string;
+  name: string;
+  channel: 'linkedin' | 'email' | 'reddit';
+  status: 'draft' | 'active' | 'paused' | 'completed';
+  total_leads: number;
+  connections_sent: number;
+  connections_accepted: number;
+  messages_sent: number;
+  replies_received: number;
+  meetings_booked: number;
+  created_at: string;
+}
+
+export interface OutreachLead {
+  id: string;
+  full_name: string;
+  title: string | null;
+  company: string | null;
+  linkedin_url: string | null;
+  seniority_level: string | null;
+  messages: {
+    connection_note: string;
+    follow_up_1: string;
+    follow_up_2: string;
+    follow_up_3: string;
+    inmail: string;
+  };
+  status: {
+    current_step: string;
+    connection_sent_at: string | null;
+    connection_accepted_at: string | null;
+    replied_at: string | null;
+    reply_sentiment: string | null;
+    meeting_booked_at: string | null;
+    opted_out: boolean;
+  };
+  relevance_context: {
+    hook?: string;
+    angle?: string;
+    tone?: string;
+  };
+}
+
+export interface OutreachCampaignDetail {
+  campaign: OutreachCampaign;
+  stats: {
+    total: number;
+    by_step: Record<string, number>;
+    by_seniority: Record<string, number>;
+    replied: number;
+    meetings_booked: number;
+  };
+  leads: OutreachLead[];
+}
+
 // ─── EXISTING TYPES (kept for backward compat) ─────────────────────────────
 
 export interface Draft {
