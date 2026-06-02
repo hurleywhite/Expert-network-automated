@@ -44,7 +44,6 @@ export default function Dashboard() {
             </div>
             <div className="flex items-center gap-4 text-sm">
               <span className="text-white font-medium border-b-2 border-white pb-1">My Projects</span>
-              <span className="text-white/70 hover:text-white cursor-pointer">Events &amp; Library</span>
             </div>
           </div>
         </div>
