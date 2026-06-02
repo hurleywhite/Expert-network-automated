@@ -17,6 +17,7 @@ export default async function handler(req: VercelRequest, res: VercelResponse) {
     campaign_name,
     min_relevance_score = 50,
     limit = 25,
+    max_per_company = 1,  // Company diversity: max experts per company in a campaign
     sender_name = 'Hurley',
     sender_title = 'Founder, ArcticBlue AI',
     target_seniority = ['VP', 'Director', 'C-Suite', 'Head', 'SVP', 'EVP', 'Chief', 'Partner', 'Managing Director'],
@@ -64,8 +65,10 @@ export default async function handler(req: VercelRequest, res: VercelResponse) {
 
     if (campError) throw campError;
 
-    // Get qualified experts with LinkedIn URLs
-    const { data: profiles } = await supabase
+    // Get a generous pool of qualified experts with LinkedIn URLs, best first.
+    // We fetch more than `limit` so we can enforce company diversity and still fill the campaign.
+    const poolSize = Math.min(Math.max(limit * 10, 100), 500);
+    const { data: pool } = await supabase
       .from('expert_profiles')
       .select(`
         id,
@@ -87,14 +90,41 @@ export default async function handler(req: VercelRequest, res: VercelResponse) {
       .gte('relevance_score', min_relevance_score)
       .not('candidates.linkedin_url', 'is', null)
       .order('relevance_score', { ascending: false })
-      .limit(limit);
+      .limit(poolSize);
 
-    if (!profiles?.length) {
+    if (!pool?.length) {
       return res.status(200).json({
         campaign_id: campaign.id,
         leads_created: 0,
         message: 'No qualified experts with LinkedIn profiles found. Try lowering min_relevance_score or sourcing more experts.',
       });
+    }
+
+    // Enforce company diversity: at most `max_per_company` experts per company.
+    // The pool is ordered by relevance_score desc, so we keep the strongest expert(s) per company.
+    const normalizeCompany = (name: string | null | undefined): string => {
+      if (!name) return '';
+      return name
+        .toLowerCase()
+        .replace(/[.,]/g, '')
+        .replace(/\b(inc|llc|ltd|limited|corp|corporation|co|company|gmbh|sa|ag|plc|group|holdings|the)\b/g, '')
+        .replace(/\s+/g, ' ')
+        .trim();
+    };
+
+    const perCompanyCap = Math.max(1, Number(max_per_company) || 1);
+    const companyCounts: Record<string, number> = {};
+    const profiles: any[] = [];
+    for (const p of pool) {
+      const company = normalizeCompany((p as any).candidates?.company);
+      // Candidates with an unknown company are each treated as distinct (cannot prove same employer).
+      if (company) {
+        const count = companyCounts[company] || 0;
+        if (count >= perCompanyCap) continue;
+        companyCounts[company] = count + 1;
+      }
+      profiles.push(p);
+      if (profiles.length >= limit) break;
     }
 
     // Build project context for Claude
@@ -259,7 +289,10 @@ Return a JSON object with exactly these fields:
       campaign_id: campaign.id,
       campaign_name: campaign.name,
       leads_created: leadsCreated,
-      total_candidates_evaluated: profiles.length,
+      leads_selected: profiles.length,
+      max_per_company: perCompanyCap,
+      unique_companies: Object.keys(companyCounts).length,
+      qualified_pool_size: pool.length,
     });
 
   } catch (error: any) {
