@@ -1,18 +1,23 @@
 -- ============================================================================
 -- Supabase schema for the Expert Network / LinkedIn outreach app
 -- ----------------------------------------------------------------------------
--- IMPORTANT: This schema was RECONSTRUCTED from the application code on
--- 2026-06-02, because the original Supabase project was auto-paused for >90
--- days and could not be restored, and the schema had never been committed to
--- the repo. It is the authoritative source going forward — keep it in sync
--- with any future schema changes.
+-- IMPORTANT: This schema was reconstructed from the application code and then
+-- VALIDATED column-by-column against the LIVE Supabase project
+-- (rnyaheobwdqofpfwukoy) on 2026-06-02 via the PostgREST REST API. It now
+-- matches every live table. The schema had never been committed to the repo;
+-- this file is the authoritative source going forward — keep it in sync with
+-- any future schema changes.
 --
--- Sources used to reconstruct it:
+-- Sources used:
 --   - backend/app/models.py and backend/alembic/versions/d001_add_glg_tables.py
 --     (project_briefs, candidates, project_categories, screener_questions,
 --      expert_profiles, expert_activities, linkedin_outreach)
---   - api/outreach/*.ts  (outreach_campaigns, outreach_leads — these two tables
---     existed ONLY in the dead database; columns inferred from code usage)
+--   - api/outreach/*.ts  (outreach_campaigns, outreach_leads)
+--   - live DB column introspection on 2026-06-02, which added columns the code
+--     alone did not reveal: project_briefs.channel; outreach_campaigns
+--     .target_titles/.sequence_steps/.template_data/.heyreach_inmail_campaign_id;
+--     outreach_leads.routing/.routing_reason/.approved/.approved_at/.rejected/
+--     .follow_up_{1,2,3}_sent_at/.error_message/.updated_at
 --
 -- To apply: run this whole file against a fresh Supabase project
 -- (SQL Editor, or `supabase db execute`). It is idempotent-ish: it uses
@@ -31,6 +36,7 @@ create table if not exists public.project_briefs (
   name              text not null,
   industry          text,
   subvertical       text,
+  channel           text default 'b2b',  -- project audience type: 'b2b' | 'consumer' (verified against live DB 2026-06-02)
   company_size_min  integer,
   regions           jsonb not null default '[]'::jsonb,
   titles_include    jsonb not null default '[]'::jsonb,
@@ -159,7 +165,11 @@ create table if not exists public.outreach_campaigns (
   replies_received      integer not null default 0,
   meetings_booked       integer not null default 0,
   daily_limit           integer not null default 30,
+  target_titles         jsonb not null default '[]'::jsonb,
+  sequence_steps        jsonb not null default '[]'::jsonb,   -- [{step,type,delay_days}, ...]
+  template_data         jsonb not null default '{}'::jsonb,   -- channel-specific payload (e.g. Reddit post body/title/subreddit)
   heyreach_campaign_id  text,
+  heyreach_inmail_campaign_id  text,
   heyreach_list_id      text,
   created_at            timestamptz not null default now(),
   updated_at            timestamptz default now()
@@ -184,14 +194,24 @@ create table if not exists public.outreach_leads (
   inmail_message           text,
   personalization_context  jsonb not null default '{}'::jsonb,
   current_step             text default 'connection_request',
+  routing                  text,                              -- e.g. 'connection_first'
+  routing_reason           text,
+  approved                 boolean not null default false,
+  approved_at              timestamptz,
+  rejected                 boolean not null default false,
   heyreach_lead_id         text,
   connection_sent_at       timestamptz,
   connection_accepted_at   timestamptz,
+  follow_up_1_sent_at      timestamptz,
+  follow_up_2_sent_at      timestamptz,
+  follow_up_3_sent_at      timestamptz,
   replied_at               timestamptz,
   reply_sentiment          text,
   meeting_booked_at        timestamptz,
   opted_out                boolean not null default false,
-  created_at               timestamptz not null default now()
+  error_message            text,
+  created_at               timestamptz not null default now(),
+  updated_at               timestamptz default now()
 );
 create index if not exists ix_outreach_leads_campaign on public.outreach_leads (campaign_id);
 create index if not exists ix_outreach_leads_profile  on public.outreach_leads (expert_profile_id);
