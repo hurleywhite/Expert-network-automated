@@ -35,17 +35,17 @@ export default function Dashboard() {
   return (
     <div className="min-h-screen bg-gray-50">
       {/* Nav Header */}
-      <nav className="bg-slate-900 text-white">
+      <nav className="bg-[#1fa0dc] text-white">
         <div className="max-w-7xl mx-auto px-6 py-3 flex items-center justify-between">
           <div className="flex items-center gap-6">
-            <span className="text-lg font-bold tracking-tight">myExpertNetwork</span>
+            <div className="flex items-center gap-2">
+              <img src="/arcticblue-logo.png" alt="ArcticBlue" className="h-8 w-auto" />
+              <span className="text-lg font-bold tracking-tight">ExpertNetwork Outreach</span>
+            </div>
             <div className="flex items-center gap-4 text-sm">
               <span className="text-white font-medium border-b-2 border-white pb-1">My Projects</span>
-              <span className="text-gray-400 hover:text-white cursor-pointer">Events & Library</span>
+              <span className="text-white/70 hover:text-white cursor-pointer">Events &amp; Library</span>
             </div>
-          </div>
-          <div className="flex items-center gap-4 text-sm">
-            <span className="text-gray-300">ArcticBlue AI</span>
           </div>
         </div>
       </nav>

@@ -1,5 +1,5 @@
 import { useState, useEffect } from 'react';
-import { useParams, Link } from 'react-router-dom';
+import { useParams, Link, useNavigate } from 'react-router-dom';
 import { projectsApi, expertNetworkApi, outreachApi } from '../api/client';
 import type { Project, ProjectCategory, ExpertCard, OutreachCampaign } from '../types';
 import CategorySection from '../components/CategorySection';
@@ -9,7 +9,10 @@ type Tab = 'experts' | 'all-experts' | 'campaigns';
 
 export default function ProjectDetail() {
   const { projectId } = useParams<{ projectId: string }>();
+  const navigate = useNavigate();
   const [project, setProject] = useState<Project | null>(null);
+  const [allProjects, setAllProjects] = useState<Project[]>([]);
+  const [projectMenuOpen, setProjectMenuOpen] = useState(false);
   const [categories, setCategories] = useState<ProjectCategory[]>([]);
   const [expertsByCategory, setExpertsByCategory] = useState<Record<string, ExpertCard[]>>({});
   const [allExperts, setAllExperts] = useState<ExpertCard[]>([]);
@@ -26,6 +29,10 @@ export default function ProjectDetail() {
     if (!projectId) return;
     loadData();
   }, [projectId]);
+
+  useEffect(() => {
+    projectsApi.list().then(setAllProjects).catch(() => {});
+  }, []);
 
   const loadData = async () => {
     if (!projectId) return;
@@ -130,12 +137,14 @@ export default function ProjectDetail() {
   return (
     <div className="min-h-screen bg-gray-50">
       {/* Nav */}
-      <nav className="bg-slate-900 text-white">
+      <nav className="bg-[#1fa0dc] text-white">
         <div className="max-w-7xl mx-auto px-6 py-3 flex items-center justify-between">
           <div className="flex items-center gap-6">
-            <Link to="/" className="text-lg font-bold tracking-tight">myExpertNetwork</Link>
+            <Link to="/" className="flex items-center gap-2">
+              <img src="/arcticblue-logo.png" alt="ArcticBlue" className="h-8 w-auto" />
+              <span className="text-lg font-bold tracking-tight">ExpertNetwork Outreach</span>
+            </Link>
           </div>
-          <span className="text-sm text-gray-300">ArcticBlue AI</span>
         </div>
       </nav>
 
@@ -143,7 +152,45 @@ export default function ProjectDetail() {
       <div className="bg-white border-b">
         <div className="max-w-7xl mx-auto px-6 py-6">
           <Link to="/" className="text-sm text-blue-600 hover:text-blue-800 mb-2 inline-block">&larr; All Projects</Link>
-          <h1 className="text-2xl font-bold text-gray-900">{project.name}</h1>
+          <div className="relative">
+            <button
+              onClick={() => setProjectMenuOpen((o) => !o)}
+              className="inline-flex items-center gap-2 text-2xl font-bold text-gray-900 hover:text-gray-700"
+            >
+              {project.name}
+              <svg
+                className={`w-5 h-5 text-gray-400 transition-transform ${projectMenuOpen ? 'rotate-180' : ''}`}
+                fill="none" viewBox="0 0 24 24" stroke="currentColor" strokeWidth={2}
+              >
+                <path strokeLinecap="round" strokeLinejoin="round" d="M19 9l-7 7-7-7" />
+              </svg>
+            </button>
+            {projectMenuOpen && (
+              <>
+                <div className="fixed inset-0 z-10" onClick={() => setProjectMenuOpen(false)} />
+                <div className="absolute left-0 mt-2 w-80 max-h-96 overflow-auto bg-white border border-gray-200 rounded-lg shadow-lg z-20 py-1">
+                  {allProjects.map((p) => (
+                    <button
+                      key={p.id}
+                      onClick={() => {
+                        setProjectMenuOpen(false);
+                        if (p.id !== projectId) navigate(`/projects/${p.id}`);
+                      }}
+                      className={`w-full text-left px-4 py-2 text-sm hover:bg-gray-50 ${
+                        p.id === projectId ? 'bg-blue-50 text-blue-700 font-semibold' : 'text-gray-700'
+                      }`}
+                    >
+                      {p.name}
+                      {p.industry && <span className="block text-xs text-gray-400">{p.industry}</span>}
+                    </button>
+                  ))}
+                  {allProjects.length === 0 && (
+                    <div className="px-4 py-2 text-sm text-gray-400">No projects found</div>
+                  )}
+                </div>
+              </>
+            )}
+          </div>
           {project.industry && <p className="text-sm text-gray-500 mt-1">Industry: {project.industry}</p>}
 
           {/* Action buttons */}
