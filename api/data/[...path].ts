@@ -165,6 +165,14 @@ export default async function handler(req: VercelRequest, res: VercelResponse) {
       return res.status(404).json({ error: 'Not found' });
     }
 
+    // A missing environment variable is the one server-side failure worth
+    // naming: the variable names are not secret, and without them a
+    // misconfigured deploy is indistinguishable from a broken one.
+    if (err?.name === 'ConfigError') {
+      console.error('[api/data] configuration error:', err.message);
+      return res.status(503).json({ error: err.message });
+    }
+
     if (status >= 500) {
       console.error('[api/data] error:', err);
       // Never leak connection strings or key material to the client.

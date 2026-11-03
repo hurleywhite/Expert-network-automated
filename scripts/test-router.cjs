@@ -126,6 +126,17 @@ const cases = [
     r.status === 500 && r.payload?.error === 'Internal server error'
       ? ok('500 does not echo internal message') : bad(`leaked: ${JSON.stringify(r.payload)}`);
   }
+  stub.listCampaigns = () => {
+    const e = new Error('Supabase is not configured: missing SUPABASE_URL. See SETUP.md.');
+    e.name = 'ConfigError'; e.statusCode = 503;
+    return Promise.reject(e);
+  };
+  {
+    const r = await run('GET', ['projects', U, 'campaigns']);
+    r.status === 503 && /missing SUPABASE_URL/.test(r.payload?.error || '')
+      ? ok('missing env var -> 503 naming the variable')
+      : bad(`config error -> ${r.status}: ${JSON.stringify(r.payload)}`);
+  }
   stub.getProject = () => Promise.reject({ code: 'PGRST116', message: 'no rows' });
   {
     const r = await run('GET', ['projects', U]);
