@@ -60,3 +60,6 @@ htmlcov/
 
 # Alembic
 alembic/versions/*.pyc
+
+# transient test build output
+.tmp-test-*/

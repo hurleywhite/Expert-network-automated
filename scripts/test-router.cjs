@@ -14,7 +14,8 @@ const os = require('os');
 const path = require('path');
 
 const ROOT = path.join(__dirname, '..');
-const OUT = fs.mkdtempSync(path.join(os.tmpdir(), 'api-router-'));
+// Compile inside the repo so the output can resolve node_modules.
+const OUT = fs.mkdtempSync(path.join(ROOT, '.tmp-test-'));
 
 try {
   execFileSync('npx', ['tsc', '--outDir', OUT], { cwd: ROOT, stdio: 'pipe' });

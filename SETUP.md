@@ -130,8 +130,14 @@ Browser ──fetch──► /api/data/*            ─► Supabase (service rol
 
 The normal run of work:
 
-1. **Create a project** — paste a requirements document on the dashboard.
-   Claude extracts the industry, expert categories and screener questions.
+1. **Create a project** — drop a requirements document on the dashboard, or
+   paste the text. PDF, Word (`.docx`), Markdown, plain text, CSV, JSON and RTF
+   are accepted, up to 3 MB. Claude extracts the industry, expert categories and
+   screener questions.
+
+   PDFs are handed to Claude whole rather than text-extracted first, so it reads
+   the real layout — tables and headings survive. `.docx` is converted
+   server-side. Legacy `.doc` is not supported; re-save it as `.docx`.
 2. **Source experts** — *Source All Categories* queries Apollo per category and
    writes candidates plus expert profiles.
 3. **Generate profiles** — Exa researches each person, Claude writes the

@@ -60,10 +60,46 @@ export const projectsApi = {
 
 // ─── EXPERT NETWORK ─────────────────────────────────────────────────────────
 
+/** Readable size that never rounds to look equal to the limit it exceeds. */
+export function humanSize(bytes: number): string {
+  if (bytes >= 1024 * 1024) return `${(bytes / 1024 / 1024).toFixed(2)} MB`;
+  return `${Math.max(1, Math.round(bytes / 1024))} KB`;
+}
+
+/** Largest upload the API will accept, before base64 encoding. */
+export const MAX_UPLOAD_BYTES = 3 * 1024 * 1024;
+export const ACCEPTED_EXTENSIONS = ['.pdf', '.docx', '.txt', '.md', '.markdown', '.csv', '.json', '.rtf'];
+
+/** Reads a File as base64, without the data: prefix. */
+function fileToBase64(file: File): Promise<string> {
+  return new Promise((resolve, reject) => {
+    const reader = new FileReader();
+    reader.onerror = () => reject(new Error(`Could not read ${file.name}.`));
+    reader.onload = () => {
+      const result = String(reader.result || '');
+      const comma = result.indexOf(',');
+      resolve(comma === -1 ? result : result.slice(comma + 1));
+    };
+    reader.readAsDataURL(file);
+  });
+}
+
 export const expertNetworkApi = {
   // AI: parse a requirements document into a project, categories and screeners
   createFromDocument: (documentText: string): Promise<any> =>
     send('/api/projects/from-document', 'POST', { document_text: documentText }),
+
+  // Same, from an uploaded file. PDFs are read by Claude directly; .docx is
+  // converted server-side; plain text formats are decoded.
+  createFromFile: async (file: File): Promise<any> => {
+    if (file.size > MAX_UPLOAD_BYTES) {
+      throw new Error(`That file is ${humanSize(file.size)}, over the 3 MB limit — paste the relevant section instead.`);
+    }
+    const data = await fileToBase64(file);
+    return send('/api/projects/from-document', 'POST', {
+      file: { name: file.name, type: file.type, data },
+    });
+  },
 
   getCategories: (projectId: string): Promise<ProjectCategory[]> =>
     get(`${DATA}/projects/${projectId}/categories`),
