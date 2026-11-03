@@ -49,6 +49,8 @@ export default async function handler(req: VercelRequest, res: VercelResponse) {
   const body = typeof req.body === 'string' ? safeParse(req.body) : req.body || {};
   const documentText: string | undefined = body.document_text;
   const file: UploadedFile | undefined = body.file;
+  // Set when the browser extracted the text itself from a file too large to upload.
+  const sourceName: string | undefined = body.source_name;
 
   if (!documentText?.trim() && !file) {
     return res.status(400).json({ error: 'Provide either document_text or a file.' });
@@ -76,9 +78,11 @@ export default async function handler(req: VercelRequest, res: VercelResponse) {
         });
       }
     } else {
+      if (sourceName) sourceLabel = sourceName;
+      const heading = sourceName ? `Requirements Document (${sourceName})` : 'Requirements Document';
       content.push({
         type: 'text',
-        text: `${EXTRACTION_PROMPT}\n\nRequirements Document:\n${documentText}`,
+        text: `${EXTRACTION_PROMPT}\n\n${heading}:\n${documentText}`,
       });
     }
 

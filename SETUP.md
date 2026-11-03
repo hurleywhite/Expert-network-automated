@@ -132,12 +132,24 @@ The normal run of work:
 
 1. **Create a project** — drop a requirements document on the dashboard, or
    paste the text. PDF, Word (`.docx`), Markdown, plain text, CSV, JSON and RTF
-   are accepted, up to 3 MB. Claude extracts the industry, expert categories and
-   screener questions.
+   are accepted, **up to 20 MB**. Claude extracts the industry, expert
+   categories and screener questions.
 
-   PDFs are handed to Claude whole rather than text-extracted first, so it reads
-   the real layout — tables and headings survive. `.docx` is converted
-   server-side. Legacy `.doc` is not supported; re-save it as `.docx`.
+   Uploads take one of two paths, chosen automatically by size, because Vercel
+   caps a function request body at 4.5 MB and base64 inflates by about a third:
+
+   - **Under 3 MB** — the file is sent whole. A PDF reaches Claude as a native
+     document, so it reads the real layout and tables and headings survive.
+     This is the better path, and covers almost every brief.
+   - **3–20 MB** — the browser extracts the text (pdf.js for PDF, mammoth for
+     `.docx`) and sends only that. Layout is lost, but the file never has to
+     cross the body limit. The upload panel marks these files so you can see
+     which path a document took.
+
+   pdf.js and mammoth are lazy-loaded, so neither is in the initial bundle.
+
+   A scanned PDF with no text layer cannot be read by either path — it needs
+   OCR first. Legacy `.doc` is not supported; re-save it as `.docx`.
 2. **Source experts** — *Source All Categories* queries Apollo per category and
    writes candidates plus expert profiles.
 3. **Generate profiles** — Exa researches each person, Claude writes the

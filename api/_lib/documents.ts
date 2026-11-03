@@ -15,6 +15,12 @@ export const MAX_FILE_BYTES = 3 * 1024 * 1024; // 3 MB
 /**
  * Vercel caps a serverless request body at 4.5 MB and base64 inflates by ~4/3,
  * so 3 MB of file is about as much as can arrive intact.
+ *
+ * This is NOT the limit the user sees. The frontend accepts documents up to
+ * 20 MB: anything above this threshold is text-extracted in the browser and
+ * arrives as document_text instead, which is small whatever the source was.
+ * A file reaching this function is therefore already meant to be under 3 MB,
+ * and exceeding it means the client-side routing was bypassed.
  */
 export const MAX_FILE_LABEL = '3 MB';
 
@@ -86,8 +92,8 @@ export async function extractDocument(file: UploadedFile): Promise<ExtractedDocu
 
   if (buffer.length > MAX_FILE_BYTES) {
     throw new DocumentError(
-      `That file is ${humanSize(buffer.length)}, over the ${MAX_FILE_LABEL} limit. ` +
-        'Paste the relevant section as text instead.',
+      `That file is ${humanSize(buffer.length)}. Files over ${MAX_FILE_LABEL} must have their ` +
+        'text extracted in the browser before upload — reload the page and try again, or paste the text.',
     );
   }
 

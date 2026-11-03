@@ -141,7 +141,7 @@ async function expectReject(label, file, pattern) {
     { name: 'sheet.xlsx', data: b64(Buffer.from('PK...')) }, /not a supported file type.*\.pdf/is);
 
   await expectReject('an oversized file reports its size and the limit',
-    { name: 'big.pdf', data: b64(Buffer.alloc(MAX_FILE_BYTES + 1024, 0x41)) }, /3\.00 MB, over the 3 MB limit/is);
+    { name: 'big.pdf', data: b64(Buffer.alloc(MAX_FILE_BYTES + 1024, 0x41)) }, /3\.00 MB.*over 3 MB.*extracted in the browser/is);
 
   await expectReject('an empty file is refused',
     { name: 'empty.txt', data: '' }, /no content|empty/i);

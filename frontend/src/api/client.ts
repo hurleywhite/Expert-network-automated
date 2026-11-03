@@ -1,3 +1,4 @@
+import { extractTextInBrowser, INLINE_UPLOAD_LIMIT } from '../lib/extractText';
 import type {
   Project,
   ProjectCategory,
@@ -66,9 +67,10 @@ export function humanSize(bytes: number): string {
   return `${Math.max(1, Math.round(bytes / 1024))} KB`;
 }
 
-/** Largest upload the API will accept, before base64 encoding. */
-export const MAX_UPLOAD_BYTES = 3 * 1024 * 1024;
+/** Largest document accepted, by either path. */
+export const MAX_UPLOAD_BYTES = 20 * 1024 * 1024;
 export const ACCEPTED_EXTENSIONS = ['.pdf', '.docx', '.txt', '.md', '.markdown', '.csv', '.json', '.rtf'];
+export { INLINE_UPLOAD_LIMIT };
 
 /** Reads a File as base64, without the data: prefix. */
 function fileToBase64(file: File): Promise<string> {
@@ -89,15 +91,38 @@ export const expertNetworkApi = {
   createFromDocument: (documentText: string): Promise<any> =>
     send('/api/projects/from-document', 'POST', { document_text: documentText }),
 
-  // Same, from an uploaded file. PDFs are read by Claude directly; .docx is
-  // converted server-side; plain text formats are decoded.
+  /**
+   * Create a project from an uploaded document.
+   *
+   * Two paths, chosen by size. Vercel caps a function request body at 4.5 MB
+   * and base64 inflates by about a third, so only files under ~3 MB can be
+   * posted whole. Those are — which is the better path, because the server
+   * hands a PDF to Claude natively and it reads the real layout.
+   *
+   * Anything larger is read in the browser and only its text is sent.
+   */
   createFromFile: async (file: File): Promise<any> => {
     if (file.size > MAX_UPLOAD_BYTES) {
-      throw new Error(`That file is ${humanSize(file.size)}, over the 3 MB limit — paste the relevant section instead.`);
+      throw new Error(
+        `That file is ${humanSize(file.size)}, over the ${humanSize(MAX_UPLOAD_BYTES)} limit — ` +
+          'paste the relevant section instead.',
+      );
     }
-    const data = await fileToBase64(file);
+
+    if (file.size <= INLINE_UPLOAD_LIMIT) {
+      const data = await fileToBase64(file);
+      return send('/api/projects/from-document', 'POST', {
+        file: { name: file.name, type: file.type, data },
+      });
+    }
+
+    const text = await extractTextInBrowser(file);
+    if (!text.trim()) {
+      throw new Error(`No text could be read from ${file.name}. Try pasting the requirements instead.`);
+    }
     return send('/api/projects/from-document', 'POST', {
-      file: { name: file.name, type: file.type, data },
+      document_text: text,
+      source_name: file.name,
     });
   },
 

@@ -1,6 +1,8 @@
 import { useState, useEffect, useRef } from 'react';
 import { Link } from 'react-router-dom';
-import { projectsApi, expertNetworkApi, ACCEPTED_EXTENSIONS, MAX_UPLOAD_BYTES, humanSize } from '../api/client';
+import {
+  projectsApi, expertNetworkApi, ACCEPTED_EXTENSIONS, MAX_UPLOAD_BYTES, INLINE_UPLOAD_LIMIT, humanSize,
+} from '../api/client';
 import type { Project } from '../types';
 
 export default function Dashboard() {
@@ -41,7 +43,10 @@ export default function Dashboard() {
       return;
     }
     if (candidate.size > MAX_UPLOAD_BYTES) {
-      setError(`That file is ${humanSize(candidate.size)}, over the 3 MB limit — paste the relevant section below instead.`);
+      setError(
+        `That file is ${humanSize(candidate.size)}, over the ${humanSize(MAX_UPLOAD_BYTES)} limit — ` +
+          'paste the relevant section below instead.',
+      );
       return;
     }
     setFile(candidate);
@@ -142,6 +147,11 @@ export default function Dashboard() {
                 <div className="flex items-center justify-center gap-3 text-sm">
                   <span className="font-medium text-gray-900">{file.name}</span>
                   <span className="text-gray-500">{humanSize(file.size)}</span>
+                  {file.size > INLINE_UPLOAD_LIMIT && (
+                    <span className="text-xs text-amber-700 bg-amber-100 px-2 py-0.5 rounded">
+                      large — text extracted in your browser
+                    </span>
+                  )}
                   <button
                     onClick={(e) => {
                       e.stopPropagation();
@@ -161,7 +171,7 @@ export default function Dashboard() {
                     Drop a document here, or <span className="text-blue-600 underline">browse</span>
                   </p>
                   <p className="text-xs text-gray-400 mt-1">
-                    PDF, Word (.docx), Markdown, text, CSV or JSON — up to 3 MB
+                    PDF, Word (.docx), Markdown, text, CSV or JSON — up to 20 MB
                   </p>
                 </>
               )}
@@ -200,7 +210,13 @@ export default function Dashboard() {
                 disabled={creating || (!file && !docText.trim())}
                 className="px-4 py-2 bg-blue-600 text-white rounded-lg text-sm font-medium hover:bg-blue-700 disabled:opacity-50"
               >
-                {creating ? (file ? 'Reading document...' : 'Creating...') : 'Create Project'}
+                {creating
+                  ? file
+                    ? file.size > INLINE_UPLOAD_LIMIT
+                      ? 'Extracting text...'
+                      : 'Reading document...'
+                    : 'Creating...'
+                  : 'Create Project'}
               </button>
             </div>
           </div>
