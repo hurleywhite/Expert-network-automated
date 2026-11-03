@@ -61,6 +61,7 @@ Environment Variables**. Add these to *Production, Preview and Development*:
 | `APOLLO_API_KEY` | Apollo key | yes — sourcing experts |
 | `EXA_API_KEY` | Exa key | optional — adds web research to profiles |
 | `HEYREACH_API_KEY` | HeyReach key | optional — pushing campaigns to LinkedIn |
+| `CRON_SECRET` | any long random string | optional — if set, the daily keep-alive requires it |
 
 > **The service-role key bypasses row-level security.** Never name it with a
 > `VITE_` prefix and never put it in `frontend/.env`: anything `VITE_*` is
@@ -85,6 +86,34 @@ resolve, and — if you pass `SUPABASE_ANON_KEY` — that the browser-facing rol
 genuinely denied. Add `DEPLOY_URL=https://…` to also probe the live API.
 
 It exits non-zero on failure, so it works in CI.
+
+---
+
+## The health check and the keep-alive
+
+`GET /api/health` reports whether the app is wired up correctly:
+
+| Response | Meaning |
+|---|---|
+| `200 {"status":"ok"}` | configured, and the database answered |
+| `503 {"status":"misconfigured"}` | a required variable is missing — it names which |
+| `503 {"status":"schema-missing"}` | connected, but step 1 hasn't been run |
+| `503 {"status":"database-unreachable"}` | wrong key, or the project is paused |
+
+It lists which variables are **set**, never their values.
+
+`vercel.json` also runs this endpoint once a day via Vercel Cron. That is
+deliberate: free-tier Supabase projects pause after about a week of inactivity,
+and that is exactly what took the previous backend down. A daily read keeps the
+project awake, so an app you only use now and then does not quietly die between
+campaigns.
+
+If you set `CRON_SECRET`, the cron request must present it. Leave it unset and
+the endpoint stays open — it is read-only and already behind Vercel's
+deployment protection.
+
+> Vercel's Hobby plan allows cron jobs to run **once per day**. If you are on
+> Hobby, leave the schedule as it is; a more frequent schedule is rejected.
 
 ---
 
@@ -114,14 +143,21 @@ The normal run of work:
 
 ## Troubleshooting
 
-**Everything returns 500 with "Internal server error."**
-The two Supabase variables are missing or wrong. Vercel → Deployments → the
-deployment → *Functions* tab shows the real message in the logs.
+**Something is wrong but you don't know what.**
+Open `/api/health` on the deployment. It will tell you whether the variables
+are set, whether the database answers, and whether the schema exists.
+
+**Calls return 503 naming a missing variable.**
+That variable is not set on the deployment, or was added after the last build.
+Add it and redeploy — environment variables are read at runtime, but a
+deployment created before the variable existed will not see it until it is
+rebuilt.
 
 **Supabase says the project is paused.**
 Free-tier projects pause after about a week of inactivity, which is what broke
-the previous backend. Resume it from the dashboard. If this keeps happening,
-either upgrade the project or add a scheduled job that queries it weekly.
+the previous backend. Resume it from the dashboard. The daily cron described
+above is there to stop it recurring — if it keeps happening, check that the
+cron is actually running (Vercel → the project → *Cron Jobs*).
 
 **The deployed URL asks you to log in.**
 Vercel SSO protection is on for this project (Settings → Deployment Protection).

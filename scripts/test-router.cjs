@@ -143,6 +143,64 @@ const cases = [
     r.status === 404 ? ok('PGRST116 maps to 404') : bad(`PGRST116 -> ${r.status}, want 404`);
   }
 
+  // ── health endpoint ──────────────────────────────────────────────────────
+  console.log('\n\x1b[1mHealth endpoint\x1b[0m');
+  {
+    const sbPath = require.resolve(path.join(BUILD, '_lib', 'supabase.js'));
+    class ConfigError extends Error {
+      constructor(m) { super(m); this.name = 'ConfigError'; this.statusCode = 503; }
+    }
+    let dbResult = { error: null };
+    const sbStub = {
+      ConfigError,
+      getSupabaseAdmin: () => ({ from: () => ({ select: () => Promise.resolve(dbResult) }) }),
+    };
+    const sm = new Module(sbPath, null);
+    sm.exports = sbStub; sm.loaded = true; sm.filename = sbPath;
+    require.cache[sbPath] = sm;
+
+    const health = require(path.join(BUILD, 'health.js')).default;
+    const callHealth = () => {
+      let status = 200, payload;
+      const res = { status(c) { status = c; return this; }, json(p) { payload = p; return this; } };
+      return health({ method: 'GET', headers: {}, query: {} }, res).then(() => ({ status, payload }));
+    };
+
+    const saved = { ...process.env };
+    delete process.env.SUPABASE_URL; delete process.env.SUPABASE_SERVICE_ROLE_KEY;
+    let r = await callHealth();
+    r.status === 503 && r.payload?.status === 'misconfigured' && /SUPABASE_URL/.test(r.payload.error)
+      ? ok('no env vars -> 503 misconfigured, naming them')
+      : bad(`misconfigured case -> ${r.status}: ${JSON.stringify(r.payload)}`);
+
+    r.payload?.env && r.payload.env.SUPABASE_SERVICE_ROLE_KEY === false
+      ? ok('env report is booleans only (no values)')
+      : bad(`env report wrong: ${JSON.stringify(r.payload?.env)}`);
+
+    process.env.SUPABASE_URL = 'https://x.supabase.co';
+    process.env.SUPABASE_SERVICE_ROLE_KEY = 'service-role-secret-value';
+    dbResult = { error: null };
+    r = await callHealth();
+    r.status === 200 && r.payload?.status === 'ok' && r.payload?.database === 'reachable'
+      ? ok('configured + reachable -> 200 ok') : bad(`ok case -> ${r.status}: ${JSON.stringify(r.payload)}`);
+
+    JSON.stringify(r.payload).includes('service-role-secret-value')
+      ? bad('health response leaked the key value') : ok('health response never contains key values');
+
+    console.error = () => {};
+    dbResult = { error: { code: 'PGRST205', message: "relation 'project_briefs' does not exist" } };
+    r = await callHealth();
+    r.status === 503 && r.payload?.status === 'schema-missing'
+      ? ok('tables missing -> 503 schema-missing') : bad(`schema case -> ${r.status}: ${JSON.stringify(r.payload)}`);
+
+    dbResult = { error: { code: 'XX000', message: 'connection refused' } };
+    r = await callHealth();
+    r.status === 503 && r.payload?.status === 'database-unreachable'
+      ? ok('db down -> 503 database-unreachable') : bad(`db-down case -> ${r.status}: ${JSON.stringify(r.payload)}`);
+
+    process.env = saved;
+  }
+
   console.error = realErr;
   console.log(fail === 0 ? '\n\x1b[32mAll router checks passed.\x1b[0m\n'
                          : `\n\x1b[31m${fail} check(s) failed.\x1b[0m\n`);
