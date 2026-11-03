@@ -1,5 +1,5 @@
 import type { VercelRequest, VercelResponse } from '@vercel/node';
-import { getSupabaseAdmin } from '../lib/supabase';
+import { getSupabaseAdmin } from '../_lib/supabase';
 
 /**
  * Exports campaign leads as JSON (for manual use or import into any LinkedIn tool).

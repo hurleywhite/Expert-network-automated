@@ -216,34 +216,73 @@ create table if not exists public.outreach_leads (
 create index if not exists ix_outreach_leads_campaign on public.outreach_leads (campaign_id);
 create index if not exists ix_outreach_leads_profile  on public.outreach_leads (expert_profile_id);
 
+-- ─── message_drafts ─────────────────────────────────────────────────────────
+-- Referenced by frontend/src/api/client.ts (draftsApi) and backend/app/models.py
+-- (MessageDraft). This table was missing from earlier versions of this file.
+create table if not exists public.message_drafts (
+  id               uuid primary key default gen_random_uuid(),
+  candidate_id     uuid not null references public.candidates(id) on delete cascade,
+  project_id       uuid not null references public.project_briefs(id) on delete cascade,
+  subject          text not null,
+  body             text not null,
+  facts_used       jsonb not null default '[]'::jsonb,
+  risk_flags       jsonb not null default '[]'::jsonb,
+  approved_at      timestamptz,
+  approved_by      text,
+  approved_hash    text,
+  sequence_number  integer not null default 1,          -- 1 = initial, 2+ = follow-up
+  parent_draft_id  uuid references public.message_drafts(id) on delete set null,
+  created_at       timestamptz not null default now()
+);
+create index if not exists ix_message_drafts_project   on public.message_drafts (project_id);
+create index if not exists ix_message_drafts_candidate on public.message_drafts (candidate_id);
+
+-- ─── rejection_learnings ────────────────────────────────────────────────────
+-- Captures rejected drafts so future generations can learn from them.
+create table if not exists public.rejection_learnings (
+  id                 bigint generated always as identity primary key,
+  project_id         uuid not null references public.project_briefs(id) on delete cascade,
+  candidate_title    text,
+  candidate_company  text,
+  rejected_subject   text not null,
+  rejected_body      text not null,
+  inferred_issues    jsonb not null default '[]'::jsonb,
+  rejected_by        text not null,
+  created_at         timestamptz not null default now()
+);
+create index if not exists ix_rejection_learning_project on public.rejection_learnings (project_id);
+
 -- ============================================================================
--- ROW-LEVEL SECURITY  (READ THIS)
+-- ROW-LEVEL SECURITY
 -- ----------------------------------------------------------------------------
--- The frontend talks to Supabase with the ANON key directly (see
--- frontend/src/api/client.ts), while the serverless API routes use the
--- service-role key (which bypasses RLS).
+-- The browser no longer talks to Postgres. Every read and write goes through
+-- the Vercel serverless functions in /api, which authenticate with the
+-- SERVICE ROLE key. The service role bypasses RLS entirely.
 --
--- With RLS DISABLED (the default after CREATE TABLE), anyone holding the anon
--- key — which ships in the frontend bundle and is therefore public — can read
--- and write every row, including candidate names, emails, and LinkedIn URLs.
--- That is an exposure you should not ship to a public URL.
+-- So we enable RLS on every table and create NO policies. The effect:
+--   - anon / authenticated roles  -> denied on every row, every operation
+--   - service_role (our /api)     -> unaffected, full access
 --
--- Recommended (uncomment ONE approach):
---
---   (A) Lock down to logged-in users only. Requires the frontend to use a
---       Supabase auth session instead of the bare anon key.
---
---   do $$ declare t text;
---   begin
---     for t in select unnest(array['project_briefs','candidates','project_categories',
---       'screener_questions','expert_profiles','expert_activities','linkedin_outreach',
---       'outreach_campaigns','outreach_leads']) loop
---       execute format('alter table public.%I enable row level security;', t);
---       execute format($p$create policy "authenticated_all" on public.%I
---         for all to authenticated using (true) with check (true);$p$, t);
---     end loop;
---   end $$;
---
---   (B) Internal-only tool, single operator, NOT on a public URL: you may leave
---       RLS disabled — but treat the deployed URL and anon key as secrets.
+-- This is deliberately a deny-all. If you ever point a browser client at this
+-- database again, it will read nothing until you add explicit policies.
 -- ============================================================================
+
+do $$
+declare t text;
+begin
+  foreach t in array array[
+    'project_briefs','candidates','project_categories','screener_questions',
+    'expert_profiles','expert_activities','linkedin_outreach',
+    'outreach_campaigns','outreach_leads','message_drafts','rejection_learnings'
+  ] loop
+    execute format('alter table public.%I enable row level security;', t);
+    execute format('alter table public.%I force row level security;', t);
+  end loop;
+end $$;
+
+-- Revoke the default PostgREST grants from the browser-facing roles as a second
+-- layer, so a future accidental policy does not silently open the data up.
+revoke all on all tables in schema public from anon, authenticated;
+revoke all on all sequences in schema public from anon, authenticated;
+alter default privileges in schema public revoke all on tables from anon, authenticated;
+alter default privileges in schema public revoke all on sequences from anon, authenticated;

@@ -1,5 +1,5 @@
 import type { VercelRequest, VercelResponse } from '@vercel/node';
-import { getSupabaseAdmin } from '../lib/supabase';
+import { getSupabaseAdmin } from '../_lib/supabase';
 
 /**
  * Pushes a campaign's leads to HeyReach for automated sending.

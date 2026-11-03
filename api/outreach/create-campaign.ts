@@ -1,6 +1,6 @@
 import type { VercelRequest, VercelResponse } from '@vercel/node';
 import Anthropic from '@anthropic-ai/sdk';
-import { getSupabaseAdmin } from '../lib/supabase';
+import { getSupabaseAdmin } from '../_lib/supabase';
 
 /**
  * Creates an outreach campaign for a project:
