@@ -52,6 +52,29 @@ const send = <T>(path: string, method: 'POST' | 'PATCH', payload?: unknown) =>
 
 const DATA = '/api/data';
 
+// ─── HEALTH ─────────────────────────────────────────────────────────────────
+
+export interface HealthReport {
+  status: 'ok' | 'misconfigured' | 'schema-missing' | 'database-unreachable';
+  error?: string;
+  env?: Record<string, boolean>;
+}
+
+/**
+ * Asks the API what is wrong with it.
+ *
+ * Used when a data call fails, so the UI can say which piece of setup is
+ * missing instead of rendering an empty state that looks like "no data yet".
+ */
+export async function getHealth(): Promise<HealthReport | null> {
+  try {
+    const res = await fetch(`${API_BASE}/api/health`);
+    return (await res.json()) as HealthReport;
+  } catch {
+    return null;
+  }
+}
+
 // ─── PROJECTS ───────────────────────────────────────────────────────────────
 
 export const projectsApi = {

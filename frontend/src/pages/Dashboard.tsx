@@ -1,7 +1,7 @@
 import { useState, useEffect, useRef } from 'react';
 import { Link } from 'react-router-dom';
 import {
-  projectsApi, expertNetworkApi, ACCEPTED_EXTENSIONS, MAX_UPLOAD_BYTES, INLINE_UPLOAD_LIMIT, humanSize,
+  projectsApi, expertNetworkApi, getHealth, ACCEPTED_EXTENSIONS, MAX_UPLOAD_BYTES, INLINE_UPLOAD_LIMIT, humanSize,
 } from '../api/client';
 import type { Project } from '../types';
 
@@ -14,13 +14,34 @@ export default function Dashboard() {
   const [dragging, setDragging] = useState(false);
   const [error, setError] = useState<string | null>(null);
   const [creating, setCreating] = useState(false);
+  const [loadError, setLoadError] = useState<string | null>(null);
   const fileInputRef = useRef<HTMLInputElement>(null);
 
+  const loadProjects = async () => {
+    setLoading(true);
+    setLoadError(null);
+    try {
+      setProjects(await projectsApi.list());
+    } catch {
+      // A failed list is not an empty list. Ask the API what is actually wrong
+      // so the page can name the missing piece instead of rendering the
+      // "no projects yet" empty state, which reads as "nothing here yet".
+      const health = await getHealth();
+      const missing = health?.env
+        ? Object.entries(health.env).filter(([, set]) => !set).map(([k]) => k)
+        : [];
+      setLoadError(
+        [
+          health?.error || 'Could not reach the API.',
+          missing.length ? `Not set on this deployment: ${missing.join(', ')}.` : '',
+        ].filter(Boolean).join(' '),
+      );
+    }
+    setLoading(false);
+  };
+
   useEffect(() => {
-    projectsApi.list().then((data) => {
-      setProjects(data);
-      setLoading(false);
-    }).catch(() => setLoading(false));
+    loadProjects();
   }, []);
 
   const reset = () => {
@@ -60,9 +81,8 @@ export default function Dashboard() {
       if (file) await expertNetworkApi.createFromFile(file);
       else await expertNetworkApi.createFromDocument(docText);
 
-      const updated = await projectsApi.list();
-      setProjects(updated);
       reset();
+      await loadProjects();
     } catch (err: any) {
       // Surface the API's own message: it explains bad uploads, missing keys
       // and unreadable scans specifically.
@@ -225,6 +245,24 @@ export default function Dashboard() {
         {/* Project List */}
         {loading ? (
           <p className="text-gray-500">Loading projects...</p>
+        ) : loadError ? (
+          <div className="border border-amber-300 bg-amber-50 rounded-lg p-6">
+            <h3 className="text-base font-semibold text-amber-900 mb-1">
+              The backend isn't reachable
+            </h3>
+            <p className="text-sm text-amber-800">{loadError}</p>
+            <p className="text-xs text-amber-700 mt-3">
+              Your projects are not lost — the app just can't read them right now.
+              See <code className="bg-amber-100 px-1 rounded">SETUP.md</code> for the
+              environment variables this deployment needs.
+            </p>
+            <button
+              onClick={loadProjects}
+              className="mt-4 px-3 py-1.5 bg-amber-900 text-white rounded-lg text-sm font-medium hover:bg-amber-800"
+            >
+              Retry
+            </button>
+          </div>
         ) : projects.length === 0 ? (
           <div className="text-center py-16">
             <p className="text-gray-400 text-lg">No projects yet.</p>
