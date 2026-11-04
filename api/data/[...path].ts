@@ -61,9 +61,41 @@ function firstQuery(req: VercelRequest, key: string): string | undefined {
   return v as string | undefined;
 }
 
+/**
+ * The path segments this request is for.
+ *
+ * Vercel normally fills req.query.path for a [...path] catch-all, but that
+ * depends on its dynamic-route param injection, which does not always fire
+ * when the project also declares explicit rewrites. The URL is the source of
+ * truth either way, so fall back to parsing it rather than 404-ing on a
+ * request that plainly names a resource.
+ */
+function pathSegments(req: VercelRequest): string[] {
+  const raw = req.query?.path;
+  const fromQuery = (Array.isArray(raw) ? raw : raw ? [raw] : []).filter(Boolean);
+  if (fromQuery.length) return fromQuery.map(String);
+
+  const url = req.url || '';
+  const pathname = url.split('?')[0];
+  const marker = '/api/data';
+  const i = pathname.indexOf(marker);
+  if (i === -1) return [];
+
+  return pathname
+    .slice(i + marker.length)
+    .split('/')
+    .filter(Boolean)
+    .map((s) => {
+      try {
+        return decodeURIComponent(s);
+      } catch {
+        return s;
+      }
+    });
+}
+
 async function route(req: VercelRequest): Promise<unknown> {
-  const raw = req.query.path;
-  const segments = (Array.isArray(raw) ? raw : raw ? [raw] : []).filter(Boolean);
+  const segments = pathSegments(req);
   const method = (req.method || 'GET').toUpperCase();
 
   const [resource, id, action] = segments;

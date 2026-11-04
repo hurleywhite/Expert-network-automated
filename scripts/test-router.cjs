@@ -44,9 +44,13 @@ require.cache[repoPath] = m;
 
 const handler = require(path.join(BUILD, 'data', '[...path].js')).default;
 
-function run(method, segments, { query = {}, body = undefined } = {}) {
+function run(method, segments, { query = {}, body = undefined, viaUrl = false } = {}) {
   called = null;
-  const req = { method, query: { ...query, path: segments }, body };
+  // viaUrl simulates Vercel NOT injecting the catch-all param, which is what
+  // happens on a project that also declares rewrites: only req.url carries the path.
+  const req = viaUrl
+    ? { method, query: { ...query }, body, url: '/api/data/' + segments.join('/') }
+    : { method, query: { ...query, path: segments }, body, url: '/api/data/' + segments.join('/') };
   let status = 200, payload;
   const res = { status(c) { status = c; return this; }, json(p) { payload = p; return this; } };
   return handler(req, res).then(() => ({ status, payload, called }));
@@ -100,6 +104,18 @@ const cases = [
     const r = await run('POST', ['drafts', U, 'reject'], { body: { rejected_by: 'me', reason: 'too long' } });
     r.called?.name === 'rejectDraft' && r.called.args[2] === 'too long'
       ? ok('reject forwards reason') : bad(`reason not forwarded: ${JSON.stringify(r.called)}`);
+  }
+
+  console.log('\n\x1b[1mURL fallback (Vercel does not inject the catch-all param)\x1b[0m');
+  for (const [label, [method, segs], wantFn] of [
+    ['GET  /projects',                ['GET', ['projects']],                   'listProjects'],
+    ['GET  /projects/:id/categories', ['GET', ['projects', U, 'categories']],  'listCategories'],
+    ['GET  /experts/:id',             ['GET', ['experts', U]],                 'getExpertProfile'],
+  ]) {
+    const r = await run(method, segs, { viaUrl: true });
+    r.status === 200 && r.called?.name === wantFn
+      ? ok(`${label} resolves from req.url alone -> ${wantFn}`)
+      : bad(`${label} via url -> ${r.status} ${r.called?.name}: ${JSON.stringify(r.payload)}`);
   }
 
   console.log('\n\x1b[1mValidation and errors\x1b[0m');
