@@ -11,6 +11,7 @@
     "test:api": "node scripts/test-router.cjs",
     "verify": "node scripts/verify-setup.mjs",
     "test:docs": "node scripts/test-documents.cjs",
-    "test": "node scripts/test-router.cjs && node scripts/test-documents.cjs"
+    "test": "node scripts/test-router.cjs && node scripts/test-documents.cjs",
+    "check:routes": "./scripts/check-routes.sh"
   }
 }
