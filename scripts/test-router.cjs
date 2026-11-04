@@ -1,6 +1,6 @@
 #!/usr/bin/env node
 /**
- * Route-level tests for api/data/[...path].ts.
+ * Route-level tests for api/data.ts.
  *
  *   node scripts/test-router.cjs
  *
@@ -42,15 +42,22 @@ const m = new Module(repoPath, null);
 m.exports = stub; m.loaded = true; m.filename = repoPath;
 require.cache[repoPath] = m;
 
-const handler = require(path.join(BUILD, 'data', '[...path].js')).default;
+const handler = require(path.join(BUILD, 'data.js')).default;
 
-function run(method, segments, { query = {}, body = undefined, viaUrl = false } = {}) {
+function run(method, segments, { query = {}, body = undefined, viaUrl = false, viaString = false } = {}) {
   called = null;
   // viaUrl simulates Vercel NOT injecting the catch-all param, which is what
   // happens on a project that also declares rewrites: only req.url carries the path.
+  // Three shapes this handler must cope with:
+  //   viaUrl   - nothing but req.url (no param injected at all)
+  //   viaString- the vercel.json rewrite form: ?path=experts/<id>, one string
+  //   default  - an array, as a dynamic route would supply
+  const url = '/api/data/' + segments.join('/');
   const req = viaUrl
-    ? { method, query: { ...query }, body, url: '/api/data/' + segments.join('/') }
-    : { method, query: { ...query, path: segments }, body, url: '/api/data/' + segments.join('/') };
+    ? { method, query: { ...query }, body, url }
+    : viaString
+    ? { method, query: { ...query, path: segments.join('/') }, body, url }
+    : { method, query: { ...query, path: segments }, body, url };
   let status = 200, payload;
   const res = { status(c) { status = c; return this; }, json(p) { payload = p; return this; } };
   return handler(req, res).then(() => ({ status, payload, called }));
@@ -116,6 +123,19 @@ const cases = [
     r.status === 200 && r.called?.name === wantFn
       ? ok(`${label} resolves from req.url alone -> ${wantFn}`)
       : bad(`${label} via url -> ${r.status} ${r.called?.name}: ${JSON.stringify(r.payload)}`);
+  }
+
+  console.log('\n\x1b[1mRewrite form (?path=a/b as a single string)\x1b[0m');
+  for (const [label, [method, segs], wantFn] of [
+    ['GET  /projects',                ['GET', ['projects']],                   'listProjects'],
+    ['GET  /projects/:id',            ['GET', ['projects', U]],                'getProject'],
+    ['GET  /projects/:id/categories', ['GET', ['projects', U, 'categories']],  'listCategories'],
+    ['GET  /experts/:id',             ['GET', ['experts', U]],                 'getExpertProfile'],
+  ]) {
+    const r = await run(method, segs, { viaString: true });
+    r.status === 200 && r.called?.name === wantFn
+      ? ok(`${label} resolves from ?path string -> ${wantFn}`)
+      : bad(`${label} via string -> ${r.status} ${r.called?.name}: ${JSON.stringify(r.payload)}`);
   }
 
   console.log('\n\x1b[1mValidation and errors\x1b[0m');

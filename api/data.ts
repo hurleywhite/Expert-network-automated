@@ -1,8 +1,14 @@
 import type { VercelRequest, VercelResponse } from '@vercel/node';
-import * as repo from '../_lib/repo';
+import * as repo from './_lib/repo';
 
 /**
  * Single entry point for all database reads and writes.
+ *
+ * This is a plain function, not a [...path] catch-all. Vercel's catch-all in
+ * the api/ directory only ever matched one segment here, so /api/data/experts/<id>
+ * 404'd at the edge while /api/data/experts resolved. vercel.json rewrites
+ * /api/data/(.*) to this file with the rest of the path as ?path=, which is
+ * deterministic and does not depend on dynamic-route resolution.
  *
  * The browser used to query Supabase directly with a public anon key. Every
  * one of those calls now lands here, where the service-role key never leaves
@@ -72,8 +78,12 @@ function firstQuery(req: VercelRequest, key: string): string | undefined {
  */
 function pathSegments(req: VercelRequest): string[] {
   const raw = req.query?.path;
-  const fromQuery = (Array.isArray(raw) ? raw : raw ? [raw] : []).filter(Boolean);
-  if (fromQuery.length) return fromQuery.map(String);
+  // The rewrite delivers the remainder as one string ("experts/<id>"), while a
+  // dynamic route would deliver an array. Accept either, and split on slashes.
+  const fromQuery = (Array.isArray(raw) ? raw : raw ? [raw] : [])
+    .flatMap((v) => String(v).split('/'))
+    .filter(Boolean);
+  if (fromQuery.length) return fromQuery.map(decodeSegment);
 
   const url = req.url || '';
   const pathname = url.split('?')[0];
@@ -85,13 +95,15 @@ function pathSegments(req: VercelRequest): string[] {
     .slice(i + marker.length)
     .split('/')
     .filter(Boolean)
-    .map((s) => {
-      try {
-        return decodeURIComponent(s);
-      } catch {
-        return s;
-      }
-    });
+    .map(decodeSegment);
+}
+
+function decodeSegment(s: string): string {
+  try {
+    return decodeURIComponent(s);
+  } catch {
+    return s;
+  }
 }
 
 async function route(req: VercelRequest): Promise<unknown> {
