@@ -44,6 +44,7 @@ async function handler(req: VercelRequest, res: VercelResponse) {
           category_name: category.name,
           sourced: 0,
           already_present: 0,
+          enriched: 0,
           pages_read: 0,
           next_page: (category.last_sourced_page || 0) + 1,
           exhausted: false,
@@ -54,6 +55,7 @@ async function handler(req: VercelRequest, res: VercelResponse) {
 
     const sourced = results.reduce((n, r) => n + r.sourced, 0);
     const alreadyPresent = results.reduce((n, r) => n + r.already_present, 0);
+    const enriched = results.reduce((n, r) => n + r.enriched, 0);
     const exhausted = results.every((r) => r.exhausted);
 
     return res.status(200).json({
@@ -62,8 +64,11 @@ async function handler(req: VercelRequest, res: VercelResponse) {
       already_present: alreadyPresent,
       categories_searched: categories.length,
       all_exhausted: exhausted,
+      // Enrichment is the credit-consuming step, so report it rather than
+      // letting Apollo credits drain invisibly.
+      enriched,
       // So the UI can say what happened rather than silently doing nothing.
-      message: buildMessage(sourced, alreadyPresent, exhausted, results),
+      message: buildMessage(sourced, alreadyPresent, exhausted, results, enriched),
       results,
     });
   } catch (error: any) {
@@ -80,11 +85,13 @@ function buildMessage(
   alreadyPresent: number,
   exhausted: boolean,
   results: SourceOutcome[],
+  enriched: number,
 ): string {
   const failed = results.filter((r) => r.error);
   if (sourced > 0) {
     const skipped = alreadyPresent ? ` ${alreadyPresent} were already in the project.` : '';
-    return `Added ${sourced} new expert${sourced === 1 ? '' : 's'}.${skipped}`;
+    const credits = enriched ? ` ${enriched} Apollo enrichment${enriched === 1 ? '' : 's'} used.` : '';
+    return `Added ${sourced} new expert${sourced === 1 ? '' : 's'}.${skipped}${credits}`;
   }
   if (failed.length === results.length && failed[0]?.error) {
     return `Apollo could not be reached: ${failed[0].error}`;
