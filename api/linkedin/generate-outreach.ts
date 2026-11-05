@@ -1,6 +1,6 @@
 import type { VercelRequest, VercelResponse } from '@vercel/node';
-import Anthropic from '@anthropic-ai/sdk';
 import { getSupabaseAdmin } from '../_lib/supabase';
+import { completeText, extractJson, describeOpenAiError } from '../_lib/llm';
 
 export default async function handler(req: VercelRequest, res: VercelResponse) {
   if (req.method !== 'POST') return res.status(405).json({ error: 'Method not allowed' });
@@ -9,7 +9,6 @@ export default async function handler(req: VercelRequest, res: VercelResponse) {
   if (!project_id) return res.status(400).json({ error: 'project_id is required' });
 
   try {
-    const anthropic = new Anthropic({ apiKey: process.env.ANTHROPIC_API_KEY });
     const supabase = getSupabaseAdmin();
 
     // Get project info
@@ -61,12 +60,7 @@ export default async function handler(req: VercelRequest, res: VercelResponse) {
       const candidate = (profile as any).candidates;
 
       // Generate personalized connection note (max 300 chars)
-      const message = await anthropic.messages.create({
-        model: 'claude-sonnet-4-20250514',
-        max_tokens: 512,
-        messages: [{
-          role: 'user',
-          content: `Write a LinkedIn connection request note for an expert network outreach. Keep it under 280 characters.
+      const message = await completeText({ prompt: `Write a LinkedIn connection request note for an expert network outreach. Keep it under 280 characters.
 
 From: ${sender_name} at ArcticBlue AI
 To: ${candidate.full_name}, ${candidate.title} at ${candidate.company}
@@ -80,19 +74,13 @@ Rules:
 - Don't use generic phrases like "I came across your profile"
 - End with a soft ask (brief chat, share perspectives)
 
-Return ONLY the connection note text, no quotes or formatting.`
-        }]
-      });
+Return ONLY the connection note text, no quotes or formatting.`, maxOutputTokens: 512 });
 
-      const connectionNote = (message.content[0].type === 'text' ? message.content[0].text : '').trim().substring(0, 300);
+      // LinkedIn hard-caps a connection note at 300 characters.
+      const connectionNote = message.trim().substring(0, 300);
 
       // Generate follow-up message
-      const followUpMsg = await anthropic.messages.create({
-        model: 'claude-sonnet-4-20250514',
-        max_tokens: 1024,
-        messages: [{
-          role: 'user',
-          content: `Write a LinkedIn follow-up message after connecting. This is for an expert network — we want to schedule a paid consultation call.
+      const followUpMsg = await completeText({ prompt: `Write a LinkedIn follow-up message after connecting. This is for an expert network — we want to schedule a paid consultation call.
 
 From: ${sender_name} at ArcticBlue AI
 To: ${candidate.full_name}, ${candidate.title} at ${candidate.company}
@@ -106,11 +94,9 @@ Rules:
 - Ask for a brief 15-min intro call
 - Don't be pushy
 
-Return ONLY the message text, no quotes.`
-        }]
-      });
+Return ONLY the message text, no quotes.`, maxOutputTokens: 1024 });
 
-      const followUpMessage = followUpMsg.content[0].type === 'text' ? followUpMsg.content[0].text.trim() : '';
+      const followUpMessage = followUpMsg.trim();
 
       // Insert the outreach record
       await supabase.from('linkedin_outreach').insert({
@@ -138,6 +124,10 @@ Return ONLY the message text, no quotes.`
     });
 
   } catch (error: any) {
+    if (error?.name === 'ConfigError') return res.status(503).json({ error: error.message });
+    const openAiError = describeOpenAiError(error);
+    if (openAiError) return res.status(openAiError.status).json({ error: openAiError.error });
+
     console.error('Error generating LinkedIn outreach:', error);
     return res.status(500).json({ error: error.message || 'Internal server error' });
   }

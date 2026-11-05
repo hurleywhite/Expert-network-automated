@@ -57,11 +57,17 @@ Environment Variables**. Add these to *Production, Preview and Development*:
 |---|---|---|
 | `SUPABASE_URL` | `https://<project-ref>.supabase.co` | **yes** |
 | `SUPABASE_SERVICE_ROLE_KEY` | the `service_role` secret | **yes** |
-| `ANTHROPIC_API_KEY` | `sk-ant-…` | yes — document parsing, profiles, campaign copy |
+| `OPENAI_API_KEY` | `sk-…` | yes — document parsing, profiles, campaign copy |
+| `OPENAI_MODEL` | e.g. `gpt-6-astra` | optional — defaults to `gpt-6-astra` |
 | `APOLLO_API_KEY` | Apollo key | yes — sourcing experts |
 | `EXA_API_KEY` | Exa key | optional — adds web research to profiles |
 | `HEYREACH_API_KEY` | HeyReach key | optional — pushing campaigns to LinkedIn |
 | `CRON_SECRET` | any long random string | optional — if set, the daily keep-alive requires it |
+
+The model is **GPT-6** via OpenAI's Responses API. PDFs are sent to it as files
+rather than text-extracted, so it reads the real layout. Set `OPENAI_MODEL` to
+switch variant (`gpt-6-sol`, `gpt-6-luna`, `gpt-6.1-sol`, `gpt-6.1-terra`)
+without touching the code.
 
 > **The service-role key bypasses row-level security.** Never name it with a
 > `VITE_` prefix and never put it in `frontend/.env`: anything `VITE_*` is
@@ -121,10 +127,10 @@ deployment protection.
 
 ```
 Browser ──fetch──► /api/data/*            ─► Supabase (service role)
-                   /api/projects/from-document ─► Claude  ─► Supabase
+                   /api/projects/from-document ─► GPT-6  ─► Supabase
                    /api/sourcing/*              ─► Apollo  ─► Supabase
-                   /api/profiles/generate       ─► Exa + Claude ─► Supabase
-                   /api/outreach/create-campaign ─► Claude ─► Supabase
+                   /api/profiles/generate       ─► Exa + GPT-6 ─► Supabase
+                   /api/outreach/create-campaign ─► GPT-6 ─► Supabase
                    /api/outreach/push-to-heyreach ─► HeyReach
 ```
 
@@ -132,13 +138,13 @@ The normal run of work:
 
 1. **Create a project** — drop a requirements document on the dashboard, or
    paste the text. PDF, Word (`.docx`), Markdown, plain text, CSV, JSON and RTF
-   are accepted, **up to 20 MB**. Claude extracts the industry, expert
+   are accepted, **up to 20 MB**. GPT-6 extracts the industry, expert
    categories and screener questions.
 
    Uploads take one of two paths, chosen automatically by size, because Vercel
    caps a function request body at 4.5 MB and base64 inflates by about a third:
 
-   - **Under 3 MB** — the file is sent whole. A PDF reaches Claude as a native
+   - **Under 3 MB** — the file is sent whole. A PDF reaches GPT-6 as a native
      document, so it reads the real layout and tables and headings survive.
      This is the better path, and covers almost every brief.
    - **3–20 MB** — the browser extracts the text (pdf.js for PDF, mammoth for
@@ -152,9 +158,9 @@ The normal run of work:
    OCR first. Legacy `.doc` is not supported; re-save it as `.docx`.
 2. **Source experts** — *Source All Categories* queries Apollo per category and
    writes candidates plus expert profiles.
-3. **Generate profiles** — Exa researches each person, Claude writes the
+3. **Generate profiles** — Exa researches each person, GPT-6 writes the
    overview, relevance score, rate and screener answers.
-4. **Create a campaign** — Claude writes a connection note, three follow-ups and
+4. **Create a campaign** — GPT-6 writes a connection note, three follow-ups and
    an InMail per lead, capped at one lead per company so you don't hit the same
    employer repeatedly.
 5. **Send** — push to HeyReach, or export the campaign as JSON.

@@ -105,7 +105,7 @@ async function expectReject(label, file, pattern) {
     !r.text.includes('published authors') ? `missing body text: ${JSON.stringify(r.text.slice(0, 80))}` :
     !r.text.includes('Expert Network Brief') ? 'missing heading' : null);
 
-  await expectOk('.pdf is passed through for Claude to read', { name: 'brief.pdf', data: b64(buildPdf('Published authors')) }, (r) =>
+  await expectOk('.pdf is passed through for GPT-6 to read', { name: 'brief.pdf', data: b64(buildPdf('Published authors')) }, (r) =>
     r.kind !== 'pdf' ? `kind was ${r.kind}, expected pdf` :
     Buffer.from(r.base64, 'base64').subarray(0, 5).toString() !== '%PDF-' ? 'base64 is not a PDF' : null);
 

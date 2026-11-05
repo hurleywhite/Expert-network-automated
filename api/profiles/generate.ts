@@ -1,6 +1,6 @@
 import type { VercelRequest, VercelResponse } from '@vercel/node';
-import Anthropic from '@anthropic-ai/sdk';
 import { getSupabaseAdmin } from '../_lib/supabase';
+import { completeText, extractJson, describeOpenAiError } from '../_lib/llm';
 
 export default async function handler(req: VercelRequest, res: VercelResponse) {
   if (req.method !== 'POST') return res.status(405).json({ error: 'Method not allowed' });
@@ -9,7 +9,6 @@ export default async function handler(req: VercelRequest, res: VercelResponse) {
   if (!project_id) return res.status(400).json({ error: 'project_id is required' });
 
   try {
-    const anthropic = new Anthropic({ apiKey: process.env.ANTHROPIC_API_KEY });
     const supabase = getSupabaseAdmin();
 
     // Get project info
@@ -98,7 +97,7 @@ export default async function handler(req: VercelRequest, res: VercelResponse) {
         }
       }
 
-      // Build the Claude prompt for expert profiling
+      // Build the prompt for expert profiling
       const screenerQuestionsText = (questions || [])
         .map((q: any, i: number) => `${i + 1}. ${q.question_text} (${q.question_type})${q.options?.length ? ` Options: ${q.options.join(', ')}` : ''}`)
         .join('\n');
@@ -107,12 +106,7 @@ export default async function handler(req: VercelRequest, res: VercelResponse) {
         ? `\n\nWeb Research Results:\n${exaResearch.results.map((r: any) => `- ${r.title}: ${r.snippet}`).join('\n')}`
         : '';
 
-      const message = await anthropic.messages.create({
-        model: 'claude-sonnet-4-20250514',
-        max_tokens: 2048,
-        messages: [{
-          role: 'user',
-          content: `You are generating an expert network profile. Create a comprehensive profile for this expert based on available data.
+      const message = await completeText({ prompt: `You are generating an expert network profile. Create a comprehensive profile for this expert based on available data.
 
 Expert:
 - Name: ${candidate.full_name}
@@ -149,11 +143,9 @@ ${screenerQuestionsText || 'None defined'}
 Important:
 - relevance_score should be 0-100 based on how well the expert matches the project needs
 - rate_per_hour should be a realistic USD hourly rate for this expert's seniority/domain
-- For screener_responses, make your best estimate based on the expert's profile; mark confidence accordingly`
-        }]
-      });
+- For screener_responses, make your best estimate based on the expert's profile; mark confidence accordingly`, maxOutputTokens: 2048 });
 
-      const responseText = message.content[0].type === 'text' ? message.content[0].text : '';
+      const responseText = message;
       const jsonMatch = responseText.match(/\{[\s\S]*\}/);
 
       if (jsonMatch) {
@@ -189,6 +181,10 @@ Important:
     });
 
   } catch (error: any) {
+    if (error?.name === 'ConfigError') return res.status(503).json({ error: error.message });
+    const openAiError = describeOpenAiError(error);
+    if (openAiError) return res.status(openAiError.status).json({ error: openAiError.error });
+
     console.error('Error generating profiles:', error);
     return res.status(500).json({ error: error.message || 'Internal server error' });
   }

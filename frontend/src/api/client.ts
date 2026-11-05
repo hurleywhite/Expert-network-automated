@@ -120,7 +120,7 @@ export const expertNetworkApi = {
    * Two paths, chosen by size. Vercel caps a function request body at 4.5 MB
    * and base64 inflates by about a third, so only files under ~3 MB can be
    * posted whole. Those are — which is the better path, because the server
-   * hands a PDF to Claude natively and it reads the real layout.
+   * hands a PDF to GPT-6 natively and it reads the real layout.
    *
    * Anything larger is read in the browser and only its text is sent.
    */

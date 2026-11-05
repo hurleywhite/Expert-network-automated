@@ -7,7 +7,7 @@
  * however large the source was.
  *
  * Smaller files still go to the server whole — a PDF under the threshold is
- * handed to Claude natively, which reads layout, tables and headings that this
+ * handed to GPT-6 natively, which reads layout, tables and headings that this
  * extractor would flatten.
  *
  * pdf.js and mammoth are both loaded on demand: neither is in the main bundle.

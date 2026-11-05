@@ -1,10 +1,9 @@
 import mammoth from 'mammoth';
 
 /**
- * Turns an uploaded requirements document into something Claude can read.
+ * Turns an uploaded requirements document into something GPT-6 can read.
  *
- * PDFs are not text-extracted here. Claude accepts PDFs natively as a document
- * content block and sees layout, tables and headings, which a text extractor
+ * PDFs are not text-extracted here. GPT-6 accepts PDFs natively as a file input and sees layout, tables and headings, which a text extractor
  * would flatten and frequently scramble. Word files have no such path, so they
  * go through mammoth. Plain text formats are just decoded.
  */
@@ -47,7 +46,7 @@ export interface UploadedFile {
   type?: string;
 }
 
-/** Either plain text to inline in the prompt, or a PDF to hand to Claude whole. */
+/** Either plain text to inline in the prompt, or a PDF to hand to GPT-6 whole. */
 export type ExtractedDocument =
   | { kind: 'text'; text: string; source: string }
   | { kind: 'pdf'; base64: string; source: string };
@@ -73,7 +72,7 @@ function decodeBase64(data: string): Buffer {
   return buf;
 }
 
-/** RTF carries its text inside control words; strip them rather than ship markup to Claude. */
+/** RTF carries its text inside control words; strip them rather than ship markup to GPT-6. */
 function stripRtf(raw: string): string {
   return raw
     .replace(/\\'[0-9a-f]{2}/gi, ' ')

@@ -1,11 +1,11 @@
 import type { VercelRequest, VercelResponse } from '@vercel/node';
-import Anthropic from '@anthropic-ai/sdk';
 import { getSupabaseAdmin } from '../_lib/supabase';
+import { completeText, extractJson, describeOpenAiError } from '../_lib/llm';
 
 /**
  * Creates an outreach campaign for a project:
  * 1. Selects qualified experts (by relevance score + seniority)
- * 2. Uses Claude to generate personalized, multi-step LinkedIn sequences for each lead
+ * 2. Uses GPT-6 to generate personalized, multi-step LinkedIn sequences for each lead
  * 3. Stores everything in outreach_campaigns + outreach_leads tables
  * 4. Ready to push to HeyReach (or manual send)
  */
@@ -29,7 +29,6 @@ export default async function handler(req: VercelRequest, res: VercelResponse) {
   if (!project_id) return res.status(400).json({ error: 'project_id is required' });
 
   try {
-    const anthropic = new Anthropic({ apiKey: process.env.ANTHROPIC_API_KEY });
     const supabase = getSupabaseAdmin();
 
     // Get project details
@@ -127,7 +126,7 @@ export default async function handler(req: VercelRequest, res: VercelResponse) {
       if (profiles.length >= limit) break;
     }
 
-    // Build project context for Claude
+    // Build project context for the model
     const projectContext = context_override || `
 Project: ${project.name}
 Industry: ${project.industry || 'N/A'}
@@ -157,13 +156,8 @@ Expert Categories: ${(categories || []).map((c: any) => c.name).join(', ')}
         .map((r: any) => `- ${r.title}: ${r.snippet || ''}`.substring(0, 200))
         .join('\n');
 
-      // Generate the full outreach sequence via Claude
-      const message = await anthropic.messages.create({
-        model: 'claude-sonnet-4-20250514',
-        max_tokens: 3000,
-        messages: [{
-          role: 'user',
-          content: `You are a world-class B2B outreach copywriter for an expert network (like GLG, AlphaSights, or Guidepoint). Generate a personalized LinkedIn outreach sequence for recruiting this executive as a paid expert consultant.
+      // Generate the full outreach sequence via GPT-6
+      const message = await completeText({ prompt: `You are a world-class B2B outreach copywriter for an expert network (like GLG, AlphaSights, or Guidepoint). Generate a personalized LinkedIn outreach sequence for recruiting this executive as a paid expert consultant.
 
 EXPERT PROFILE:
 - Name: ${candidate.full_name}
@@ -236,11 +230,9 @@ Return a JSON object with exactly these fields:
     "angle": "Why their expertise is uniquely valuable",
     "tone": "peer-to-peer|respectful-formal|warm-casual"
   }
-}`
-        }]
-      });
+}`, maxOutputTokens: 3000 });
 
-      const responseText = message.content[0].type === 'text' ? message.content[0].text : '';
+      const responseText = message;
       const jsonMatch = responseText.match(/\{[\s\S]*\}/);
 
       if (!jsonMatch) {
@@ -296,6 +288,10 @@ Return a JSON object with exactly these fields:
     });
 
   } catch (error: any) {
+    if (error?.name === 'ConfigError') return res.status(503).json({ error: error.message });
+    const openAiError = describeOpenAiError(error);
+    if (openAiError) return res.status(openAiError.status).json({ error: openAiError.error });
+
     console.error('Error creating outreach campaign:', error);
     return res.status(500).json({ error: error.message || 'Internal server error' });
   }

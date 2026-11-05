@@ -18,7 +18,7 @@ import { getSupabaseAdmin, ConfigError } from './_lib/supabase';
  */
 
 const REQUIRED = ['SUPABASE_URL', 'SUPABASE_SERVICE_ROLE_KEY'] as const;
-const OPTIONAL = ['ANTHROPIC_API_KEY', 'APOLLO_API_KEY', 'EXA_API_KEY', 'HEYREACH_API_KEY'] as const;
+const OPTIONAL = ['OPENAI_API_KEY', 'OPENAI_MODEL', 'APOLLO_API_KEY', 'EXA_API_KEY', 'HEYREACH_API_KEY'] as const;
 
 export default async function handler(req: VercelRequest, res: VercelResponse) {
   // Vercel cron invocations carry this header when CRON_SECRET is configured.
