@@ -188,6 +188,11 @@ const cases = [
       constructor(m) { super(m); this.name = 'ConfigError'; this.statusCode = 503; }
     }
     let dbResult = { error: null };
+    // health probes the REST gateway with fetch before querying, so the test
+    // has to decide what that gateway says.
+    let gatewayStatus = 200;
+    const realFetch = globalThis.fetch;
+    globalThis.fetch = async () => ({ status: gatewayStatus });
     const sbStub = {
       ConfigError,
       getSupabaseAdmin: () => ({ from: () => ({ select: () => Promise.resolve(dbResult) }) }),
@@ -235,6 +240,25 @@ const cases = [
     r.status === 503 && r.payload?.status === 'database-unreachable'
       ? ok('db down -> 503 database-unreachable') : bad(`db-down case -> ${r.status}: ${JSON.stringify(r.payload)}`);
 
+    gatewayStatus = 401;
+    r = await callHealth();
+    r.status === 503 && r.payload?.status === 'bad-key'
+      ? ok('gateway 401 -> 503 bad-key (not "paused")')
+      : bad(`bad-key case -> ${r.status}: ${JSON.stringify(r.payload)}`);
+
+    gatewayStatus = 200;
+    globalThis.fetch = async () => { throw new Error('ENOTFOUND'); };
+    r = await callHealth();
+    r.status === 503 && r.payload?.status === 'database-unreachable'
+      && /deleted, or is paused/.test(r.payload.error)
+      ? ok('unreachable host -> 503 naming the host and a stale URL')
+      : bad(`dead-host case -> ${r.status}: ${JSON.stringify(r.payload)}`);
+
+    r.payload?.supabase_host === 'x.supabase.co'
+      ? ok('reports the host it tried, so a stale URL is visible')
+      : bad(`host not reported: ${r.payload?.supabase_host}`);
+
+    globalThis.fetch = realFetch;
     process.env = saved;
   }
 
