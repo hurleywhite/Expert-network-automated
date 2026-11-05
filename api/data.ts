@@ -214,6 +214,10 @@ async function route(req: VercelRequest): Promise<unknown> {
 }
 
 export default async function handler(req: VercelRequest, res: VercelResponse) {
+  // Candidate records must never sit in a shared cache. Vercel's default
+  // includes "public", which would permit exactly that.
+  res.setHeader('Cache-Control', 'no-store, max-age=0');
+
   try {
     // Which resource is being asked for, before any auth decision. Derived the
     // same way the router derives it, so the session carve-out cannot drift
