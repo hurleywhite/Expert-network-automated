@@ -19,11 +19,22 @@ import type {
 
 const API_BASE = import.meta.env.VITE_API_URL || '';
 
+/** Raised when the API says we are not logged in, so the UI can show the gate. */
+export class UnauthorizedError extends Error {
+  constructor() {
+    super('Authentication required');
+    this.name = 'UnauthorizedError';
+  }
+}
+
 async function request<T>(path: string, options?: RequestInit): Promise<T> {
   const res = await fetch(`${API_BASE}${path}`, {
     headers: { 'Content-Type': 'application/json' },
+    credentials: 'same-origin',
     ...options,
   });
+
+  if (res.status === 401) throw new UnauthorizedError();
 
   if (!res.ok) {
     // The API returns { error } for everything it can describe; fall back to
@@ -51,6 +62,19 @@ const send = <T>(path: string, method: 'POST' | 'PATCH', payload?: unknown) =>
   });
 
 const DATA = '/api/data';
+
+// ─── SESSION ────────────────────────────────────────────────────────────────
+
+export const sessionApi = {
+  check: (): Promise<{ authenticated: boolean }> =>
+    request<{ authenticated: boolean }>(`${DATA}/session`).catch(() => ({ authenticated: false })),
+
+  login: (password: string): Promise<{ ok: boolean }> =>
+    send(`${DATA}/session`, 'POST', { password }),
+
+  logout: (): Promise<{ ok: boolean }> =>
+    request<{ ok: boolean }>(`${DATA}/session`, { method: 'DELETE' }),
+};
 
 // ─── HEALTH ─────────────────────────────────────────────────────────────────
 

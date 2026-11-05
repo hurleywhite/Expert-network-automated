@@ -1,5 +1,6 @@
 import type { VercelRequest, VercelResponse } from '@vercel/node';
 import { getSupabaseAdmin } from '../_lib/supabase';
+import { withAdmin } from '../_lib/auth';
 
 /**
  * Exports campaign leads as JSON (for manual use or import into any LinkedIn tool).
@@ -7,7 +8,7 @@ import { getSupabaseAdmin } from '../_lib/supabase';
  *
  * Also works as a campaign status/detail endpoint.
  */
-export default async function handler(req: VercelRequest, res: VercelResponse) {
+async function handler(req: VercelRequest, res: VercelResponse) {
   if (req.method !== 'GET' && req.method !== 'POST') {
     return res.status(405).json({ error: 'Method not allowed' });
   }
@@ -95,3 +96,5 @@ export default async function handler(req: VercelRequest, res: VercelResponse) {
     return res.status(500).json({ error: error.message || 'Internal server error' });
   }
 }
+
+export default withAdmin(handler);

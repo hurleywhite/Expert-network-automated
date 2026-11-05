@@ -42,9 +42,13 @@ const m = new Module(repoPath, null);
 m.exports = stub; m.loaded = true; m.filename = repoPath;
 require.cache[repoPath] = m;
 
+process.env.APP_PASSWORD = 'test-password';
+const auth = require(path.join(BUILD, '_lib', 'auth.js'));
+const VALID_COOKIE = 'enw_session=' + auth.issueToken();
+
 const handler = require(path.join(BUILD, 'data.js')).default;
 
-function run(method, segments, { query = {}, body = undefined, viaUrl = false, viaString = false } = {}) {
+function run(method, segments, { query = {}, body = undefined, viaUrl = false, viaString = false, noAuth = false } = {}) {
   called = null;
   // viaUrl simulates Vercel NOT injecting the catch-all param, which is what
   // happens on a project that also declares rewrites: only req.url carries the path.
@@ -53,14 +57,20 @@ function run(method, segments, { query = {}, body = undefined, viaUrl = false, v
   //   viaString- the vercel.json rewrite form: ?path=experts/<id>, one string
   //   default  - an array, as a dynamic route would supply
   const url = '/api/data/' + segments.join('/');
+  // Authenticated by default; the auth section below drives the unauthenticated paths.
+  const headers = noAuth ? {} : { cookie: VALID_COOKIE };
   const req = viaUrl
-    ? { method, query: { ...query }, body, url }
+    ? { method, query: { ...query }, body, url, headers }
     : viaString
-    ? { method, query: { ...query, path: segments.join('/') }, body, url }
-    : { method, query: { ...query, path: segments }, body, url };
-  let status = 200, payload;
-  const res = { status(c) { status = c; return this; }, json(p) { payload = p; return this; } };
-  return handler(req, res).then(() => ({ status, payload, called }));
+    ? { method, query: { ...query, path: segments.join('/') }, body, url, headers }
+    : { method, query: { ...query, path: segments }, body, url, headers };
+  let status = 200, payload, cookie;
+  const res = {
+    status(c) { status = c; return this; },
+    json(p) { payload = p; return this; },
+    setHeader(k, v) { if (String(k).toLowerCase() === 'set-cookie') cookie = v; return this; },
+  };
+  return handler(req, res).then(() => ({ status, payload, called, cookie }));
 }
 
 const U = '11111111-2222-3333-4444-555555555555';
@@ -136,6 +146,58 @@ const cases = [
     r.status === 200 && r.called?.name === wantFn
       ? ok(`${label} resolves from ?path string -> ${wantFn}`)
       : bad(`${label} via string -> ${r.status} ${r.called?.name}: ${JSON.stringify(r.payload)}`);
+  }
+
+  console.log('\n\x1b[1mAuthentication (the deployment is publicly reachable)\x1b[0m');
+  {
+    const r = await run('GET', ['projects'], { noAuth: true });
+    r.status === 401 && !r.called
+      ? ok('anonymous GET /projects -> 401, repo never called')
+      : bad(`anonymous read -> ${r.status}, called=${r.called?.name}`);
+  }
+  {
+    const r = await run('GET', ['projects', U, 'experts'], { noAuth: true });
+    r.status === 401 && !r.called
+      ? ok('anonymous expert PII read -> 401') : bad(`anonymous experts -> ${r.status}`);
+  }
+  {
+    const r = await run('PATCH', ['experts', U], { body: { status: 'shortlisted' }, noAuth: true });
+    r.status === 401 && !r.called ? ok('anonymous write -> 401') : bad(`anonymous write -> ${r.status}`);
+  }
+  {
+    const r = await run('POST', ['session'], { body: { password: 'wrong' }, noAuth: true });
+    r.status === 401 ? ok('wrong password -> 401') : bad(`wrong password -> ${r.status}`);
+  }
+  {
+    const r = await run('POST', ['session'], { body: { password: 'test-password' }, noAuth: true });
+    const okCookie = /enw_session=.+HttpOnly/i.test(r.cookie || '') && /Secure/i.test(r.cookie || '');
+    r.status === 200 && okCookie
+      ? ok('correct password -> HttpOnly, Secure session cookie')
+      : bad(`login -> ${r.status}, cookie=${r.cookie}`);
+    !/test-password/.test(r.cookie || '') && !JSON.stringify(r.payload).includes('test-password')
+      ? ok('the password itself never reaches the response')
+      : bad('password leaked into the response');
+  }
+  {
+    const forged = 'enw_session=' + (Date.now() + 1e6) + '.deadbeef.notavalidmac';
+    const r = await run('GET', ['projects'], { noAuth: true });
+    const r2 = await (async () => {
+      called = null;
+      let status = 200, payload;
+      const res = { status(c){status=c;return this;}, json(p){payload=p;return this;}, setHeader(){return this;} };
+      await handler({ method: 'GET', query: { path: ['projects'] }, url: '/api/data/projects', headers: { cookie: forged } }, res);
+      return { status, payload };
+    })();
+    r2.status === 401 ? ok('forged session cookie -> 401') : bad(`forged cookie -> ${r2.status}`);
+  }
+  {
+    const saved = process.env.APP_PASSWORD;
+    delete process.env.APP_PASSWORD;
+    const r = await run('GET', ['projects'], { noAuth: true });
+    r.status === 503 && /APP_PASSWORD/.test(r.payload?.error || '')
+      ? ok('no APP_PASSWORD -> fails closed with 503, not open')
+      : bad(`unset password -> ${r.status}: ${JSON.stringify(r.payload)}`);
+    process.env.APP_PASSWORD = saved;
   }
 
   console.log('\n\x1b[1mValidation and errors\x1b[0m');

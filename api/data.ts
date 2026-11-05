@@ -1,5 +1,6 @@
 import type { VercelRequest, VercelResponse } from '@vercel/node';
 import * as repo from './_lib/repo';
+import { checkPassword, issueToken, sessionCookie, clearCookie, isAuthenticated } from './_lib/auth';
 
 /**
  * Single entry point for all database reads and writes.
@@ -114,6 +115,21 @@ async function route(req: VercelRequest): Promise<unknown> {
 
   if (!resource) throw new HttpError(404, 'No resource specified');
 
+  // ── session (the only route reachable without a session) ──────────────────
+  if (resource === 'session') {
+    if (method === 'GET') return { authenticated: isAuthenticated(req) };
+    if (method === 'DELETE') return { ok: true };
+    if (method !== 'POST') throw new HttpError(405, `${method} not allowed on /session`);
+
+    const { password } = body(req);
+    if (!checkPassword(password)) {
+      // Deliberately vague: distinguishing "no password set" from "wrong
+      // password" tells an attacker which deployment to keep trying.
+      throw new HttpError(401, 'Incorrect password');
+    }
+    return { ok: true, token: issueToken() };
+  }
+
   // ── projects ──────────────────────────────────────────────────────────────
   if (resource === 'projects') {
     if (method !== 'GET') throw new HttpError(405, `${method} not allowed on /projects`);
@@ -199,7 +215,42 @@ async function route(req: VercelRequest): Promise<unknown> {
 
 export default async function handler(req: VercelRequest, res: VercelResponse) {
   try {
-    const result = await route(req);
+    // Which resource is being asked for, before any auth decision. Derived the
+    // same way the router derives it, so the session carve-out cannot drift
+    // from the route it is meant to exempt.
+    const isSessionRoute = pathSegments(req)[0] === 'session';
+
+    // Everything but the session route needs a valid session. Fail closed when
+    // APP_PASSWORD is unset: serving candidate data to anonymous callers is a
+    // worse outcome than the admin UI being unavailable.
+    if (!isSessionRoute) {
+      if (!process.env.APP_PASSWORD) {
+        return res.status(503).json({
+          error:
+            'Missing APP_PASSWORD. The admin API is disabled until it is set, because without it this ' +
+            'deployment would serve candidate data to anyone with the URL. Set it in the Vercel project ' +
+            'settings and redeploy. See SETUP.md.',
+        });
+      }
+      if (!isAuthenticated(req)) {
+        return res.status(401).json({ error: 'Authentication required' });
+      }
+    }
+
+    const result: any = await route(req);
+
+    // Hand back the session cookie on a successful login, and drop it on logout.
+    if (isSessionRoute) {
+      if ((req.method || '').toUpperCase() === 'POST' && result?.token) {
+        res.setHeader('Set-Cookie', sessionCookie(result.token));
+        return res.status(200).json({ ok: true });
+      }
+      if ((req.method || '').toUpperCase() === 'DELETE') {
+        res.setHeader('Set-Cookie', clearCookie());
+        return res.status(200).json({ ok: true });
+      }
+    }
+
     return res.status(200).json(result);
   } catch (err: any) {
     const status = err?.statusCode || err?.status || 500;

@@ -1,6 +1,7 @@
 import type { VercelRequest, VercelResponse } from '@vercel/node';
 import { getSupabaseAdmin } from '../_lib/supabase';
 import { completeText, extractJson, describeOpenAiError } from '../_lib/llm';
+import { withAdmin } from '../_lib/auth';
 
 /**
  * Creates an outreach campaign for a project:
@@ -9,7 +10,7 @@ import { completeText, extractJson, describeOpenAiError } from '../_lib/llm';
  * 3. Stores everything in outreach_campaigns + outreach_leads tables
  * 4. Ready to push to HeyReach (or manual send)
  */
-export default async function handler(req: VercelRequest, res: VercelResponse) {
+async function handler(req: VercelRequest, res: VercelResponse) {
   if (req.method !== 'POST') return res.status(405).json({ error: 'Method not allowed' });
 
   const {
@@ -296,3 +297,5 @@ Return a JSON object with exactly these fields:
     return res.status(500).json({ error: error.message || 'Internal server error' });
   }
 }
+
+export default withAdmin(handler);

@@ -1,8 +1,9 @@
 import type { VercelRequest, VercelResponse } from '@vercel/node';
 import { getSupabaseAdmin } from '../_lib/supabase';
 import { completeText, extractJson, describeOpenAiError } from '../_lib/llm';
+import { withAdmin } from '../_lib/auth';
 
-export default async function handler(req: VercelRequest, res: VercelResponse) {
+async function handler(req: VercelRequest, res: VercelResponse) {
   if (req.method !== 'POST') return res.status(405).json({ error: 'Method not allowed' });
 
   const { project_id, limit = 10 } = req.body;
@@ -189,3 +190,5 @@ Important:
     return res.status(500).json({ error: error.message || 'Internal server error' });
   }
 }
+
+export default withAdmin(handler);

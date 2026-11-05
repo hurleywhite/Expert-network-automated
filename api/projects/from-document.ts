@@ -2,6 +2,7 @@ import type { VercelRequest, VercelResponse } from '@vercel/node';
 import { getSupabaseAdmin, ConfigError } from '../_lib/supabase';
 import { completeText, extractJson, describeOpenAiError } from '../_lib/llm';
 import { extractDocument, DocumentError, type UploadedFile } from '../_lib/documents';
+import { withAdmin } from '../_lib/auth';
 
 /**
  * Creates a project from a requirements document.
@@ -43,7 +44,7 @@ Return ONLY a JSON object with exactly these fields, and no prose around it:
   ]
 }`;
 
-export default async function handler(req: VercelRequest, res: VercelResponse) {
+async function handler(req: VercelRequest, res: VercelResponse) {
   if (req.method !== 'POST') return res.status(405).json({ error: 'Method not allowed' });
 
   const body = typeof req.body === 'string' ? safeParse(req.body) : req.body || {};
@@ -158,3 +159,5 @@ function safeParse(s: string): any {
     return {};
   }
 }
+
+export default withAdmin(handler);

@@ -1,5 +1,6 @@
 import type { VercelRequest, VercelResponse } from '@vercel/node';
 import { getSupabaseAdmin } from '../_lib/supabase';
+import { withAdmin } from '../_lib/auth';
 
 /**
  * Pushes a campaign's leads to HeyReach for automated sending.
@@ -32,7 +33,7 @@ async function heyreachFetch(path: string, options: RequestInit = {}) {
   return res.json();
 }
 
-export default async function handler(req: VercelRequest, res: VercelResponse) {
+async function handler(req: VercelRequest, res: VercelResponse) {
   if (req.method !== 'POST') return res.status(405).json({ error: 'Method not allowed' });
 
   const { campaign_id, linkedin_account_id } = req.body;
@@ -171,3 +172,5 @@ export default async function handler(req: VercelRequest, res: VercelResponse) {
     return res.status(500).json({ error: error.message || 'Internal server error' });
   }
 }
+
+export default withAdmin(handler);
