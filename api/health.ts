@@ -44,6 +44,53 @@ export default async function handler(req: VercelRequest, res: VercelResponse) {
     });
   }
 
+  // Probe the REST gateway directly first. supabase-js collapses "wrong host",
+  // "paused project" and "bad key" into one opaque failure, and those need
+  // three different fixes, so distinguish them by HTTP status before querying.
+  const supabaseUrl = process.env.SUPABASE_URL as string;
+  let host = '';
+  try {
+    host = new URL(supabaseUrl).host;
+  } catch {
+    return res.status(503).json({
+      status: 'misconfigured',
+      error: `SUPABASE_URL is not a valid URL. It should look like https://<project-ref>.supabase.co`,
+      env,
+    });
+  }
+
+  let gatewayStatus: number | null = null;
+  try {
+    const probe = await fetch(`${supabaseUrl.replace(/\/$/, '')}/rest/v1/`, {
+      method: 'GET',
+      headers: { apikey: process.env.SUPABASE_SERVICE_ROLE_KEY as string },
+    });
+    gatewayStatus = probe.status;
+  } catch {
+    // Could not connect at all: the project behind this URL is gone or asleep.
+    return res.status(503).json({
+      status: 'database-unreachable',
+      error:
+        `Nothing is answering at ${host}. That Supabase project has been deleted, or is paused. ` +
+        'If you created a new project, SUPABASE_URL still points at the old one.',
+      supabase_host: host,
+      env,
+      checked_at: new Date().toISOString(),
+    });
+  }
+
+  if (gatewayStatus === 401 || gatewayStatus === 403) {
+    return res.status(503).json({
+      status: 'bad-key',
+      error:
+        `${host} is reachable but rejected the key. SUPABASE_SERVICE_ROLE_KEY does not belong to ` +
+        'this project — copy the service_role key from this project\'s Settings → API.',
+      supabase_host: host,
+      env,
+      checked_at: new Date().toISOString(),
+    });
+  }
+
   const startedAt = Date.now();
   try {
     const supabase = getSupabaseAdmin();
@@ -59,6 +106,7 @@ export default async function handler(req: VercelRequest, res: VercelResponse) {
     return res.status(200).json({
       status: 'ok',
       database: 'reachable',
+      supabase_host: host,
       latency_ms: Date.now() - startedAt,
       env,
       checked_at: new Date().toISOString(),
@@ -77,8 +125,10 @@ export default async function handler(req: VercelRequest, res: VercelResponse) {
     return res.status(503).json({
       status: schemaMissing ? 'schema-missing' : 'database-unreachable',
       error: schemaMissing
-        ? 'Connected, but the tables are missing. Apply db/supabase_schema.sql in the Supabase SQL editor. See SETUP.md.'
-        : 'Could not reach the database. If the Supabase project is paused, resume it from the dashboard.',
+        ? `Connected to ${host} and the key works, but the tables are missing. ` +
+          'Apply db/supabase_schema.sql in that project\'s SQL Editor.'
+        : `Connected to ${host} but the query failed.`,
+      supabase_host: host,
       env,
       checked_at: new Date().toISOString(),
     });
