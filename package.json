@@ -2,8 +2,16 @@
   "name": "moderated-interviews-automated",
   "private": true,
   "dependencies": {
-    "@anthropic-ai/sdk": "^0.39.0",
     "@supabase/supabase-js": "^2.49.4",
-    "@vercel/node": "^5.1.5"
+    "@vercel/node": "^5.1.5",
+    "mammoth": "^1.13.0",
+    "openai": "^7.52.0"
+  },
+  "scripts": {
+    "test:api": "node scripts/test-router.cjs",
+    "verify": "node scripts/verify-setup.mjs",
+    "test:docs": "node scripts/test-documents.cjs",
+    "test": "node scripts/test-router.cjs && node scripts/test-documents.cjs",
+    "check:routes": "./scripts/check-routes.sh"
   }
 }

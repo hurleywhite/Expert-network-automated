@@ -2,6 +2,13 @@
 
 An automated expert network outreach platform with AI-powered candidate sourcing, scoring, and personalized email drafting.
 
+> **Deploying the hosted app?** See **[SETUP.md](SETUP.md)**.
+>
+> There are two ways to run this project. The hosted app on Vercel (React
+> frontend + serverless functions + Supabase) is what `SETUP.md` covers and is
+> what the live deployment runs. The Docker Compose stack described below runs
+> the Python/FastAPI backend locally and is independent of it.
+
 ## Features
 
 - **Natural Language Project Creation**: Describe who you're looking for in plain English

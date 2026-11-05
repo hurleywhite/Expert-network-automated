@@ -1,6 +1,8 @@
-import { useState, useEffect } from 'react';
+import { useState, useEffect, useRef } from 'react';
 import { Link } from 'react-router-dom';
-import { projectsApi, expertNetworkApi } from '../api/client';
+import {
+  projectsApi, expertNetworkApi, getHealth, ACCEPTED_EXTENSIONS, MAX_UPLOAD_BYTES, INLINE_UPLOAD_LIMIT, humanSize,
+} from '../api/client';
 import type { Project } from '../types';
 
 export default function Dashboard() {
@@ -8,26 +10,83 @@ export default function Dashboard() {
   const [loading, setLoading] = useState(true);
   const [showCreate, setShowCreate] = useState(false);
   const [docText, setDocText] = useState('');
+  const [file, setFile] = useState<File | null>(null);
+  const [dragging, setDragging] = useState(false);
+  const [error, setError] = useState<string | null>(null);
   const [creating, setCreating] = useState(false);
+  const [loadError, setLoadError] = useState<string | null>(null);
+  const fileInputRef = useRef<HTMLInputElement>(null);
+
+  const loadProjects = async () => {
+    setLoading(true);
+    setLoadError(null);
+    try {
+      setProjects(await projectsApi.list());
+    } catch {
+      // A failed list is not an empty list. Ask the API what is actually wrong
+      // so the page can name the missing piece instead of rendering the
+      // "no projects yet" empty state, which reads as "nothing here yet".
+      const health = await getHealth();
+      const missing = health?.env
+        ? Object.entries(health.env).filter(([, set]) => !set).map(([k]) => k)
+        : [];
+      setLoadError(
+        [
+          health?.error || 'Could not reach the API.',
+          missing.length ? `Not set on this deployment: ${missing.join(', ')}.` : '',
+        ].filter(Boolean).join(' '),
+      );
+    }
+    setLoading(false);
+  };
 
   useEffect(() => {
-    projectsApi.list().then((data) => {
-      setProjects(data);
-      setLoading(false);
-    }).catch(() => setLoading(false));
+    loadProjects();
   }, []);
 
-  const handleCreateFromDoc = async () => {
-    if (!docText.trim()) return;
+  const reset = () => {
+    setShowCreate(false);
+    setDocText('');
+    setFile(null);
+    setError(null);
+    if (fileInputRef.current) fileInputRef.current.value = '';
+  };
+
+  const selectFile = (candidate: File | undefined) => {
+    setError(null);
+    if (!candidate) return;
+
+    const ext = candidate.name.slice(candidate.name.lastIndexOf('.')).toLowerCase();
+    if (!ACCEPTED_EXTENSIONS.includes(ext)) {
+      setError(
+        `"${candidate.name}" isn't a supported file type. Supported: ${ACCEPTED_EXTENSIONS.join(', ')}.`,
+      );
+      return;
+    }
+    if (candidate.size > MAX_UPLOAD_BYTES) {
+      setError(
+        `That file is ${humanSize(candidate.size)}, over the ${humanSize(MAX_UPLOAD_BYTES)} limit — ` +
+          'paste the relevant section below instead.',
+      );
+      return;
+    }
+    setFile(candidate);
+  };
+
+  const handleCreate = async () => {
+    if (!file && !docText.trim()) return;
     setCreating(true);
+    setError(null);
     try {
-      await expertNetworkApi.createFromDocument(docText);
-      const updated = await projectsApi.list();
-      setProjects(updated);
-      setShowCreate(false);
-      setDocText('');
-    } catch (err) {
-      console.error('Failed to create project:', err);
+      if (file) await expertNetworkApi.createFromFile(file);
+      else await expertNetworkApi.createFromDocument(docText);
+
+      reset();
+      await loadProjects();
+    } catch (err: any) {
+      // Surface the API's own message: it explains bad uploads, missing keys
+      // and unreadable scans specifically.
+      setError(String(err?.message || err).replace(/^API error \d+:\s*/, ''));
     }
     setCreating(false);
   };
@@ -66,28 +125,118 @@ export default function Dashboard() {
           <div className="bg-white border rounded-lg p-6 mb-8">
             <h2 className="text-lg font-semibold mb-4">Create Project from Requirements Document</h2>
             <p className="text-sm text-gray-500 mb-4">
-              Paste your project requirements, research brief, or expert sourcing criteria below.
-              AI will extract categories, screener questions, and search criteria automatically.
+              Upload your project requirements, research brief, or expert sourcing criteria —
+              or paste the text. AI will extract categories, screener questions, and search
+              criteria automatically.
             </p>
+
+            {/* Upload */}
+            <div
+              onDragOver={(e) => { e.preventDefault(); setDragging(true); }}
+              onDragLeave={() => setDragging(false)}
+              onDrop={(e) => {
+                e.preventDefault();
+                setDragging(false);
+                selectFile(e.dataTransfer.files?.[0]);
+              }}
+              onClick={() => fileInputRef.current?.click()}
+              role="button"
+              tabIndex={0}
+              onKeyDown={(e) => {
+                if (e.key === 'Enter' || e.key === ' ') {
+                  e.preventDefault();
+                  fileInputRef.current?.click();
+                }
+              }}
+              className={`border-2 border-dashed rounded-lg p-6 text-center cursor-pointer transition-colors ${
+                dragging
+                  ? 'border-blue-500 bg-blue-50'
+                  : file
+                  ? 'border-green-400 bg-green-50'
+                  : 'border-gray-300 hover:border-gray-400 bg-gray-50'
+              }`}
+            >
+              <input
+                ref={fileInputRef}
+                type="file"
+                className="hidden"
+                accept={ACCEPTED_EXTENSIONS.join(',')}
+                onChange={(e) => selectFile(e.target.files?.[0])}
+              />
+              {file ? (
+                <div className="flex items-center justify-center gap-3 text-sm">
+                  <span className="font-medium text-gray-900">{file.name}</span>
+                  <span className="text-gray-500">{humanSize(file.size)}</span>
+                  {file.size > INLINE_UPLOAD_LIMIT && (
+                    <span className="text-xs text-amber-700 bg-amber-100 px-2 py-0.5 rounded">
+                      large — text extracted in your browser
+                    </span>
+                  )}
+                  <button
+                    onClick={(e) => {
+                      e.stopPropagation();
+                      setFile(null);
+                      setError(null);
+                      if (fileInputRef.current) fileInputRef.current.value = '';
+                    }}
+                    className="text-gray-400 hover:text-red-600 font-medium"
+                    aria-label="Remove file"
+                  >
+                    Remove
+                  </button>
+                </div>
+              ) : (
+                <>
+                  <p className="text-sm text-gray-700 font-medium">
+                    Drop a document here, or <span className="text-blue-600 underline">browse</span>
+                  </p>
+                  <p className="text-xs text-gray-400 mt-1">
+                    PDF, Word (.docx), Markdown, text, CSV or JSON — up to 20 MB
+                  </p>
+                </>
+              )}
+            </div>
+
+            {/* Paste alternative */}
+            <div className="flex items-center gap-3 my-4">
+              <div className="h-px bg-gray-200 flex-1" />
+              <span className="text-xs text-gray-400 uppercase tracking-wide">or paste text</span>
+              <div className="h-px bg-gray-200 flex-1" />
+            </div>
+
             <textarea
               value={docText}
-              onChange={(e) => setDocText(e.target.value)}
-              placeholder="Paste your requirements document here..."
-              className="w-full h-48 border rounded-lg p-4 text-sm focus:ring-2 focus:ring-blue-500 focus:border-blue-500"
+              onChange={(e) => { setDocText(e.target.value); setError(null); }}
+              disabled={!!file}
+              placeholder={file ? 'Using the uploaded file above.' : 'Paste your requirements document here...'}
+              className="w-full h-40 border rounded-lg p-4 text-sm focus:ring-2 focus:ring-blue-500 focus:border-blue-500 disabled:bg-gray-50 disabled:text-gray-400"
             />
+
+            {error && (
+              <p className="mt-3 text-sm text-red-600 bg-red-50 border border-red-200 rounded-lg px-3 py-2">
+                {error}
+              </p>
+            )}
+
             <div className="flex justify-end gap-3 mt-4">
               <button
-                onClick={() => { setShowCreate(false); setDocText(''); }}
+                onClick={reset}
                 className="px-4 py-2 text-sm text-gray-600 hover:text-gray-800"
               >
                 Cancel
               </button>
               <button
-                onClick={handleCreateFromDoc}
-                disabled={creating || !docText.trim()}
+                onClick={handleCreate}
+                disabled={creating || (!file && !docText.trim())}
                 className="px-4 py-2 bg-blue-600 text-white rounded-lg text-sm font-medium hover:bg-blue-700 disabled:opacity-50"
               >
-                {creating ? 'Creating...' : 'Create Project'}
+                {creating
+                  ? file
+                    ? file.size > INLINE_UPLOAD_LIMIT
+                      ? 'Extracting text...'
+                      : 'Reading document...'
+                    : 'Creating...'
+                  : 'Create Project'}
               </button>
             </div>
           </div>
@@ -96,6 +245,24 @@ export default function Dashboard() {
         {/* Project List */}
         {loading ? (
           <p className="text-gray-500">Loading projects...</p>
+        ) : loadError ? (
+          <div className="border border-amber-300 bg-amber-50 rounded-lg p-6">
+            <h3 className="text-base font-semibold text-amber-900 mb-1">
+              The backend isn't reachable
+            </h3>
+            <p className="text-sm text-amber-800">{loadError}</p>
+            <p className="text-xs text-amber-700 mt-3">
+              Your projects are not lost — the app just can't read them right now.
+              See <code className="bg-amber-100 px-1 rounded">SETUP.md</code> for the
+              environment variables this deployment needs.
+            </p>
+            <button
+              onClick={loadProjects}
+              className="mt-4 px-3 py-1.5 bg-amber-900 text-white rounded-lg text-sm font-medium hover:bg-amber-800"
+            >
+              Retry
+            </button>
+          </div>
         ) : projects.length === 0 ? (
           <div className="text-center py-16">
             <p className="text-gray-400 text-lg">No projects yet.</p>

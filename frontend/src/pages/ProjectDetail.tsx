@@ -24,6 +24,8 @@ export default function ProjectDetail() {
   const [generating, setGenerating] = useState(false);
   const [creatingCampaign, setCreatingCampaign] = useState(false);
   const [expandedLead, setExpandedLead] = useState<string | null>(null);
+  const [notice, setNotice] = useState<{ kind: 'ok' | 'warn' | 'error'; text: string } | null>(null);
+  const [sourceCount, setSourceCount] = useState(25);
 
   useEffect(() => {
     if (!projectId) return;
@@ -71,14 +73,21 @@ export default function ProjectDetail() {
     }
   };
 
+  // Each of these used to swallow its error, so "it failed", "it added nobody"
+  // and "it worked" were indistinguishable from the outside.
+  const report = (err: unknown) =>
+    setNotice({ kind: 'error', text: String((err as Error)?.message || err).replace(/^API error \d+:\s*/, '') });
+
   const handleSourceAll = async () => {
     if (!projectId) return;
     setSourcing(true);
+    setNotice(null);
     try {
-      await expertNetworkApi.sourceAllCategories(projectId, 25);
+      const r = await expertNetworkApi.sourceAllCategories(projectId, sourceCount);
       await loadData();
+      setNotice({ kind: r.total_sourced > 0 ? 'ok' : 'warn', text: r.message });
     } catch (err) {
-      console.error(err);
+      report(err);
     }
     setSourcing(false);
   };
@@ -86,11 +95,18 @@ export default function ProjectDetail() {
   const handleGenerateProfiles = async () => {
     if (!projectId) return;
     setGenerating(true);
+    setNotice(null);
     try {
-      await expertNetworkApi.generateProfiles(projectId, 50);
+      const r = await expertNetworkApi.generateProfiles(projectId, 50);
       await loadData();
+      setNotice({
+        kind: r.profiled > 0 ? 'ok' : 'warn',
+        text: r.profiled > 0
+          ? `Generated ${r.profiled} profile${r.profiled === 1 ? '' : 's'}.`
+          : 'No profiles needed generating — every sourced expert already has one.',
+      });
     } catch (err) {
-      console.error(err);
+      report(err);
     }
     setGenerating(false);
   };
@@ -110,8 +126,14 @@ export default function ProjectDetail() {
       }
       await loadCampaigns();
       setActiveTab('campaigns');
+      setNotice({
+        kind: result?.leads_created > 0 ? 'ok' : 'warn',
+        text: result?.leads_created > 0
+          ? `Created a campaign with ${result.leads_created} leads.`
+          : result?.message || 'No qualified experts matched. Generate profiles first, or lower the relevance threshold.',
+      });
     } catch (err) {
-      console.error(err);
+      report(err);
     }
     setCreatingCampaign(false);
   };
@@ -200,8 +222,19 @@ export default function ProjectDetail() {
               disabled={sourcing || categories.length === 0}
               className="px-4 py-2 bg-blue-600 text-white rounded-lg text-sm font-medium hover:bg-blue-700 disabled:opacity-50"
             >
-              {sourcing ? 'Sourcing...' : 'Source Experts (Apollo)'}
+              {sourcing ? `Sourcing ${sourceCount}/category…` : `Source ${sourceCount} per Category (Apollo)`}
             </button>
+            <select
+              value={sourceCount}
+              onChange={(e) => setSourceCount(Number(e.target.value))}
+              disabled={sourcing}
+              aria-label="Experts to source per category"
+              className="px-2 py-2 border rounded-lg text-sm text-gray-700 bg-white"
+            >
+              {[10, 25, 50, 100].map((n) => (
+                <option key={n} value={n}>{n} / category</option>
+              ))}
+            </select>
             <button
               onClick={handleGenerateProfiles}
               disabled={generating || allExperts.length === 0}
@@ -217,6 +250,21 @@ export default function ProjectDetail() {
               {creatingCampaign ? 'Creating Campaign...' : 'Create Outreach Campaign'}
             </button>
           </div>
+
+          {notice && (
+            <div
+              className={`mt-4 text-sm rounded-lg px-3 py-2 border flex items-start justify-between gap-4 ${
+                notice.kind === 'ok'
+                  ? 'bg-green-50 border-green-200 text-green-800'
+                  : notice.kind === 'warn'
+                  ? 'bg-amber-50 border-amber-200 text-amber-900'
+                  : 'bg-red-50 border-red-200 text-red-700'
+              }`}
+            >
+              <span>{notice.text}</span>
+              <button onClick={() => setNotice(null)} className="opacity-60 hover:opacity-100" aria-label="Dismiss">×</button>
+            </div>
+          )}
 
           {/* Tabs */}
           <div className="flex items-center gap-6 mt-6 border-b -mb-px">
